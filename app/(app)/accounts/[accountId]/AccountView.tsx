@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { Money } from "@/components/Money";
-import { TransactionModal } from "@/components/TransactionModal";
+import { WithdrawModal } from "@/components/WithdrawModal";
 import { api, ApiError, type Account, type Pagination, type Transaction } from "@/lib/client/api";
 import { cardColorFor, formatDate, formatDateTime, formatMoney } from "@/lib/client/format";
 import { notifyError } from "@/lib/client/notify";
@@ -48,7 +48,7 @@ function AccountContent({ accountId }: { accountId: string }) {
   const [filter, setFilter] = useState<Filter>("all");
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(10);
-  const [modal, setModal] = useState<"credit" | "debit" | null>(null);
+  const [withdrawOpen, setWithdrawOpen] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
@@ -136,15 +136,12 @@ function AccountContent({ accountId }: { accountId: string }) {
           <Money value={account.balance} />
         </div>
         <div className="row gap-3 wrap">
-          <button className="btn btn-cream" onClick={() => setModal("credit")}>
-            <ArrowDownLeft size={18} /> Add money
-          </button>
-          <button className="btn btn-glass" onClick={() => setModal("debit")}>
-            <ArrowUpRight size={18} /> Withdraw
-          </button>
-          <Link href={`/transfer?from=${account.id}`} className="btn btn-glass">
+          <Link href={`/transfer?from=${account.id}`} className="btn btn-cream">
             <ArrowLeftRight size={18} /> Transfer
           </Link>
+          <button className="btn btn-glass" onClick={() => setWithdrawOpen(true)}>
+            <ArrowUpRight size={18} /> Withdraw
+          </button>
         </div>
       </section>
 
@@ -185,13 +182,13 @@ function AccountContent({ accountId }: { accountId: string }) {
             <h3>{filter === "all" ? "No activity yet" : "Nothing here"}</h3>
             <p>
               {filter === "all"
-                ? "Add money to see your first transaction appear here."
+                ? "Money arrives when an admin credits this account, or when someone transfers to you."
                 : "No transactions match this filter."}
             </p>
             {filter === "all" && (
-              <button className="btn btn-credit" style={{ marginTop: 8 }} onClick={() => setModal("credit")}>
-                <ArrowDownLeft size={18} /> Add money
-              </button>
+              <Link href={`/transfer?from=${account.id}`} className="btn btn-primary" style={{ marginTop: 8 }}>
+                <ArrowLeftRight size={18} /> Transfer
+              </Link>
             )}
           </div>
         ) : (
@@ -273,13 +270,12 @@ function AccountContent({ accountId }: { accountId: string }) {
         )}
       </section>
 
-      <TransactionModal
-        open={modal !== null}
-        onClose={() => setModal(null)}
+      <WithdrawModal
+        open={withdrawOpen}
+        onClose={() => setWithdrawOpen(false)}
         accountId={account.id}
         accountName={account.name}
         balance={account.balance}
-        initialType={modal ?? "credit"}
         onDone={() => {
           setFilter("all");
           setPage(1);

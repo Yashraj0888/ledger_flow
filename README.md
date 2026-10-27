@@ -33,7 +33,9 @@ user's data.
   another user's account id answers `404 ACCOUNT_NOT_FOUND`, identical to a non-existent id
 
 **Transactions**
-- Credit and debit with exact decimal money (`NUMERIC(18,2)`, strings in responses)
+- Users **cannot** credit their own accounts (no self-funding). New money enters only via an admin credit
+  (or as the credit leg of a transfer). User credit attempts → `403 CREDIT_FORBIDDEN`
+- Users may withdraw (debit) with exact decimal money (`NUMERIC(18,2)`, strings in responses)
 - Debit rejected when the balance is insufficient (balance unchanged)
 - Idempotent `reference_id` per account → `409` with the existing transaction; same reference allowed on other accounts
 - Insert + balance update are one atomic database operation; concurrent writers are serialised with row locks
@@ -43,18 +45,29 @@ user's data.
 - Balance endpoint
 - History with `type` filter, `page`/`limit` pagination metadata, latest-first ordering
 
-**Transfers (bonus)**
-- Atomic debit + credit between two of your own accounts, rollback on any failure, deadlock-free
+**Transfers**
+- Atomic debit + credit from one of your accounts to **any** other account (your own or another user's)
+- Destination balance is hidden when sending to someone else
+- Lookup endpoint confirms recipient name + username (never the balance)
+- Rollback on any failure, deadlock-free locking
+
+**Admin**
+- Credentials live only in env (`ADMIN_USERNAME`, `ADMIN_PASSWORD`) — not a row in `users`
+- Separate HttpOnly cookie (`lf_admin`); can list every account and **credit** any of them
+- Cannot withdraw or transfer; admin token is rejected by user APIs
+- UI: **Login as admin** on the sign-in page → `/admin` credit console
 
 **Web app**
 - **Sign in** (Password / MPIN tabs) and **Create profile** (password, a 4-6 digit MPIN with confirmation, strength meter, auto sign-in).
   Both the password and the MPIN are stored only as salted scrypt hashes (`password_hash`, `mpin_hash`)
 - **Dashboard:** total balance, account count, largest account, account cards, "New account" modal
-- **Account page:** balance hero, **Add money / Withdraw** modal (auto-generated idempotent reference),
-  history with All / Money in / Money out tabs, page-size and pagination, copy account id
-- **Transfer page:** between your own accounts, swap, live "balances after" preview, success summary
-- Toast notifications for every outcome (signed in/out, account created, money added/withdrawn, transfer done,
-  duplicate reference, insufficient balance, session expired, network problems) with friendly messages per error code
+- **Account page:** balance hero, **Withdraw** and **Transfer**, history with All / Money in / Money out tabs,
+  page-size and pagination, copy account id (needed so others can send you money)
+- **Transfer page:** to your own account **or** someone else (paste their account ID + look up), live preview,
+  success summary
+- **Admin console** (`/admin`): search every account and credit money; no withdraw/transfer
+- Toast notifications for every outcome (signed in/out, account created, withdrawn, transfer done,
+  admin credit, duplicate reference, insufficient balance, session expired) with friendly messages per error code
 - **Page gate (`proxy.ts`):** anyone without a valid session is always redirected to `/login` (including `/`),
   and signed-in users opening `/login` or `/register` go to the dashboard. The session is verified against the
   database, so forged, expired or revoked cookies are rejected and cleared. API routes are not redirected; they answer
@@ -96,6 +109,8 @@ MPIN, and you land on the dashboard.
 | `SUPABASE_URL` | Project URL, e.g. `https://<ref>.supabase.co` |
 | `SUPABASE_SERVICE_ROLE_KEY` | **Server-only** service-role/secret key (Supabase → Project Settings → API Keys). Never expose it to the browser |
 | `AUTH_PEPPER` | Random secret ≥ 32 chars mixed into password/MPIN hashes. Generate: `node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"`. Changing it invalidates all stored passwords/MPINs |
+| `ADMIN_USERNAME` | Sole admin username (not stored in the database) |
+| `ADMIN_PASSWORD` | Sole admin password (≥ 8 chars). Only used to credit accounts |
 
 ### Database
 
@@ -134,11 +149,11 @@ BASE_URL=https://your-host npm run test:e2e
 npm run lint && npm run build
 ```
 
-The suite (146 checks) covers both login options, cookie sessions, lockout and its reset, the spec's balance walkthrough
-(+100 +50 −30 −20 = 100), rejected debits, duplicates, validation codes, pagination/filter/order,
-**cross-user isolation**, parallel debits (never overdraw), parallel duplicate references,
-transfers and opposing concurrent transfers. Ledger rows are immutable, so test data is not deleted;
-each run uses fresh random usernames.
+The suite (157 checks) covers both login options, cookie sessions, lockout and its reset, admin login/credit,
+user self-credit forbidden, the spec's balance walkthrough (+100 +50 −30 −20 = 100 via admin credits),
+rejected debits, duplicates, pagination/filter/order, **cross-user isolation** (no foreign reads/debits;
+peer transfers allowed), parallel debits, parallel admin credits, own-account and peer transfers.
+Ledger rows are immutable, so test data is not deleted; each run uses fresh random usernames.
 
 ---
 

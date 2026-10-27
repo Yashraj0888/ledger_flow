@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { AlertCircle, Eye, EyeOff, Hash, Loader2, Lock, LogIn, User as UserIcon } from "lucide-react";
+import { AlertCircle, Eye, EyeOff, Hash, Loader2, Lock, LogIn, Shield, User as UserIcon } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/components/AuthProvider";
 import { ApiError } from "@/lib/client/api";
@@ -176,6 +176,11 @@ export default function LoginPage() {
 
       <p className="auth-foot">
         New to LedgerFlow? <Link href="/register">Create an account</Link>
+      </p>
+      <p className="auth-foot" style={{ marginTop: -8 }}>
+        <Link href="/admin/login" className="row gap-2" style={{ justifyContent: "center", color: "var(--muted)", fontWeight: 500 }}>
+          <Shield size={14} /> Login as admin
+        </Link>
       </p>
     </div>
   );

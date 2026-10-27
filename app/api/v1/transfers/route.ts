@@ -4,8 +4,8 @@ import { transferFunds } from "@/lib/services/ledger";
 import { createTransferSchema } from "@/lib/validation";
 
 /**
- * POST /api/v1/transfers - atomically move money between two of the caller's
- * own accounts.
+ * POST /api/v1/transfers — atomically move money from one of the caller's
+ * accounts to any other account (own or another user's).
  */
 export const POST = route(async (request) => {
   const auth = await requireAuth(request);

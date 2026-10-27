@@ -54,7 +54,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
       setUser(null);
       setStatus("anonymous");
-      router.replace("/login");
+      // Admin 401s belong on the admin login page, not the user one.
+      const path = typeof window !== "undefined" ? window.location.pathname : "";
+      router.replace(path.startsWith("/admin") ? "/admin/login" : "/login");
     });
     return () => setUnauthorizedHandler(undefined);
   }, [router]);

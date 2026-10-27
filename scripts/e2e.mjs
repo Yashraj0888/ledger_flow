@@ -6,12 +6,30 @@
 // Test users/accounts are created with random names. Ledger rows are immutable
 // by design, so test data is not deleted.
 
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
+// Load .env.local so ADMIN_* are available to the test runner (the Next server
+// already has them; this only helps the script call the admin API).
+try {
+  for (const line of readFileSync(resolve(process.cwd(), ".env.local"), "utf8").split(/\r?\n/)) {
+    const m = /^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/.exec(line);
+    if (!m || process.env[m[1]]) continue;
+    process.env[m[1]] = m[2].replace(/^['"]|['"]$/g, "");
+  }
+} catch {
+  // Optional when the host already exports the vars.
+}
+
 const BASE = process.env.BASE_URL ?? "http://localhost:3000";
 const OFFLINE = process.argv.includes("--offline");
 const run = Math.random().toString(36).slice(2, 8);
+const ADMIN_USERNAME = process.env.ADMIN_USERNAME;
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 
 let passed = 0;
 let failed = 0;
+let adminToken = null;
 
 async function call(method, path, { body, token, raw } = {}) {
   const headers = {};
@@ -66,8 +84,35 @@ async function newAccount(token, name) {
   if (res.status !== 201) throw new Error(`create account failed: ${JSON.stringify(res.json)}`);
   return res.json.data;
 }
-const tx = (token, accountId, body) => call("POST", `/api/v1/accounts/${accountId}/transactions`, { token, body });
+const withdraw = (token, accountId, body) =>
+  call("POST", `/api/v1/accounts/${accountId}/transactions`, {
+    token,
+    body: body.type ? body : { type: "debit", ...body },
+  });
 const balance = async (token, accountId) => (await call("GET", `/api/v1/accounts/${accountId}/balance`, { token })).json?.data?.balance;
+
+async function adminLogin() {
+  if (!ADMIN_USERNAME || !ADMIN_PASSWORD) {
+    throw new Error("ADMIN_USERNAME and ADMIN_PASSWORD must be set in .env.local for live tests");
+  }
+  const res = await call("POST", "/api/v1/admin/login", {
+    body: { username: ADMIN_USERNAME, password: ADMIN_PASSWORD },
+  });
+  if (res.status !== 200) throw new Error(`admin login failed: ${JSON.stringify(res.json)}`);
+  adminToken = res.json.data.token;
+  return res;
+}
+
+/** The only way to put money into an account (users cannot self-credit). */
+async function credit(accountId, amount, reference_id, description = "e2e credit") {
+  if (!adminToken) await adminLogin();
+  const res = await call("POST", `/api/v1/admin/accounts/${accountId}/credit`, {
+    token: adminToken,
+    body: { amount: String(amount), reference_id, description },
+  });
+  if (res.status !== 201) throw new Error(`admin credit failed: ${JSON.stringify(res.json)}`);
+  return res.json.data;
+}
 
 // ------------------------------------------------------------------ offline
 async function offlineSuite() {
@@ -187,39 +232,47 @@ async function accountsSuite() {
 }
 
 async function ledgerSuite() {
-  console.log("\n[transactions] credit / debit / duplicates / validation");
+  console.log("\n[transactions] admin credits + user withdraws / duplicates / validation");
   const alice = await newUser("led");
   const acc = await newAccount(alice.token, "Ledger");
   const other = await newAccount(alice.token, "Other");
 
-  // spec walkthrough
-  const r1 = await tx(alice.token, acc.id, { type: "credit", amount: "100", description: "c1", reference_id: "r1" });
-  check("credit 100 -> 201, balance 100.00", r1.status === 201 && r1.json.data.balance === "100.00" && r1.json.data.amount === "100.00", r1.json);
-  await tx(alice.token, acc.id, { type: "credit", amount: 50, reference_id: "r2" });
-  await tx(alice.token, acc.id, { type: "debit", amount: "30.00", reference_id: "r3" });
-  const r4 = await tx(alice.token, acc.id, { type: "debit", amount: "20", reference_id: "r4" });
+  expectError(
+    "user cannot self-credit",
+    await withdraw(alice.token, acc.id, { type: "credit", amount: "100", reference_id: "forbidden" }),
+    403,
+    "CREDIT_FORBIDDEN",
+  );
+  check("balance still 0 after forbidden credit", (await balance(alice.token, acc.id)) === "0.00");
+
+  // Spec walkthrough, but credits come from admin.
+  const r1 = await credit(acc.id, "100", "r1", "c1");
+  check("admin credit 100 -> balance 100.00", r1.balance === "100.00" && r1.amount === "100.00", r1);
+  await credit(acc.id, "50", "r2");
+  await withdraw(alice.token, acc.id, { type: "debit", amount: "30.00", reference_id: "r3" });
+  const r4 = await withdraw(alice.token, acc.id, { type: "debit", amount: "20", reference_id: "r4" });
   check("spec example +100 +50 -30 -20 -> 100.00", r4.json?.data?.balance === "100.00", r4.json);
 
-  const big = await tx(alice.token, acc.id, { type: "debit", amount: "150", reference_id: "big" });
+  const big = await withdraw(alice.token, acc.id, { type: "debit", amount: "150", reference_id: "big" });
   expectError("debit 150 on balance 100 rejected", big, 422, "INSUFFICIENT_BALANCE");
   check("balance unchanged after rejected debit", (await balance(alice.token, acc.id)) === "100.00");
 
-  const dup = await tx(alice.token, acc.id, { type: "credit", amount: "999", reference_id: "r1" });
+  const dup = await withdraw(alice.token, acc.id, { type: "debit", amount: "1", reference_id: "r3" });
   expectError("duplicate reference_id", dup, 409, "DUPLICATE_TRANSACTION");
-  check("duplicate returns the existing transaction", dup.json?.error?.details?.existing_transaction?.amount === "100.00" && dup.json.error.details.existing_transaction.reference_id === "r1", dup.json);
+  check("duplicate returns the existing transaction", dup.json?.error?.details?.existing_transaction?.amount === "30.00" && dup.json.error.details.existing_transaction.reference_id === "r3", dup.json);
   check("balance unchanged after duplicate", (await balance(alice.token, acc.id)) === "100.00");
-  const sameRefOther = await tx(alice.token, other.id, { type: "credit", amount: "5", reference_id: "r1" });
-  check("same reference_id allowed on a different account", sameRefOther.status === 201, sameRefOther.json);
+  await credit(other.id, "5", "r1");
+  check("same reference_id allowed on a different account", (await balance(alice.token, other.id)) === "5.00");
 
-  expectError("invalid type", await tx(alice.token, acc.id, { type: "refund", amount: "1", reference_id: "x" }), 400, "INVALID_TRANSACTION_TYPE");
+  expectError("invalid type", await withdraw(alice.token, acc.id, { type: "refund", amount: "1", reference_id: "x" }), 400, "INVALID_TRANSACTION_TYPE");
   for (const [label, amount] of [["zero", "0"], ["negative", "-5"], ["3 decimals", "1.005"], ["text", "abc"], ["empty", ""], ["boolean", true], ["exponent", "1e3"], ["huge", "99999999999999999"]]) {
-    expectError(`invalid amount (${label})`, await tx(alice.token, acc.id, { type: "credit", amount, reference_id: `bad-${label}` }), 400, "INVALID_AMOUNT");
+    expectError(`invalid amount (${label})`, await withdraw(alice.token, acc.id, { type: "debit", amount, reference_id: `bad-${label}` }), 400, "INVALID_AMOUNT");
   }
-  expectError("missing reference_id", await tx(alice.token, acc.id, { type: "credit", amount: "1" }), 400, "VALIDATION_ERROR");
-  expectError("blank reference_id", await tx(alice.token, acc.id, { type: "credit", amount: "1", reference_id: "  " }), 400, "VALIDATION_ERROR");
-  expectError("unknown field", await tx(alice.token, acc.id, { type: "credit", amount: "1", reference_id: "u1", account_id: other.id }), 400, "VALIDATION_ERROR");
-  expectError("invalid account id", await tx(alice.token, "not-a-uuid", { type: "credit", amount: "1", reference_id: "z" }), 400, "INVALID_ACCOUNT_ID");
-  expectError("account does not exist", await tx(alice.token, "3fa85f64-5717-4562-b3fc-2c963f66afa6", { type: "credit", amount: "1", reference_id: "z" }), 404, "ACCOUNT_NOT_FOUND");
+  expectError("missing reference_id", await withdraw(alice.token, acc.id, { type: "debit", amount: "1" }), 400, "VALIDATION_ERROR");
+  expectError("blank reference_id", await withdraw(alice.token, acc.id, { type: "debit", amount: "1", reference_id: "  " }), 400, "VALIDATION_ERROR");
+  expectError("unknown field", await withdraw(alice.token, acc.id, { type: "debit", amount: "1", reference_id: "u1", account_id: other.id }), 400, "VALIDATION_ERROR");
+  expectError("invalid account id", await withdraw(alice.token, "not-a-uuid", { type: "debit", amount: "1", reference_id: "z" }), 400, "INVALID_ACCOUNT_ID");
+  expectError("account does not exist", await withdraw(alice.token, "3fa85f64-5717-4562-b3fc-2c963f66afa6", { type: "debit", amount: "1", reference_id: "z" }), 404, "ACCOUNT_NOT_FOUND");
   check("rejected requests never changed the balance", (await balance(alice.token, acc.id)) === "100.00");
 
   console.log("\n[balance]");
@@ -240,8 +293,8 @@ async function ledgerSuite() {
   check("pagination meta + 2nd page", p2.json.pagination.current_page === 2 && p2.json.pagination.page_size === 3 && p2.json.pagination.total_records === 4 && p2.json.pagination.total_pages === 2 && p2.json.data.length === 1 && p2.json.data[0].reference_id === "r1", p2.json);
   const beyond = await call("GET", `/api/v1/accounts/${acc.id}/transactions?page=9`, { token: alice.token });
   check("page beyond the end -> empty list", beyond.status === 200 && beyond.json.data.length === 0 && beyond.json.pagination.total_pages === 1, beyond.json);
-  const iso = all.json.data[0].created_at;
-  check("created_at is ISO-8601 UTC", /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(iso), iso);
+  const isoTs = all.json.data[0].created_at;
+  check("created_at is ISO-8601 UTC", /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(isoTs), isoTs);
   expectError("invalid type filter", await call("GET", `/api/v1/accounts/${acc.id}/transactions?type=transfer`, { token: alice.token }), 400, "INVALID_TRANSACTION_TYPE");
   for (const q of ["page=0", "page=-1", "page=abc", "limit=0", "limit=101", "limit=1.5", "page=99999999999"]) {
     expectError(`invalid pagination (${q})`, await call("GET", `/api/v1/accounts/${acc.id}/transactions?${q}`, { token: alice.token }), 400, "INVALID_PAGINATION");
@@ -249,26 +302,31 @@ async function ledgerSuite() {
 
   console.log("\n[concurrency] parallel writes stay consistent");
   const race = await newAccount(alice.token, "Race");
-  await tx(alice.token, race.id, { type: "credit", amount: "100", reference_id: "seed" });
-  const debits10 = await Promise.all(Array.from({ length: 10 }, (_, i) => tx(alice.token, race.id, { type: "debit", amount: "30", reference_id: `par-${i}` })));
+  await credit(race.id, "100", "seed");
+  const debits10 = await Promise.all(Array.from({ length: 10 }, (_, i) => withdraw(alice.token, race.id, { type: "debit", amount: "30", reference_id: `par-${i}` })));
   const okCount = debits10.filter((r) => r.status === 201).length;
   const rejected = debits10.filter((r) => r.status === 422).length;
   check("10 parallel debits of 30 on 100: exactly 3 succeed, 7 rejected", okCount === 3 && rejected === 7, debits10.map((r) => r.status));
   check("balance is 10.00 (never negative)", (await balance(alice.token, race.id)) === "10.00");
-  const sameRef = await Promise.all(Array.from({ length: 6 }, () => tx(alice.token, race.id, { type: "credit", amount: "1", reference_id: "same-ref" })));
-  check("6 parallel identical reference_id: 1 created, 5 duplicates", sameRef.filter((r) => r.status === 201).length === 1 && sameRef.filter((r) => r.status === 409).length === 5, sameRef.map((r) => r.status));
+  const sameRefRaw = await Promise.all(Array.from({ length: 6 }, () =>
+    call("POST", `/api/v1/admin/accounts/${race.id}/credit`, {
+      token: adminToken,
+      body: { amount: "1", reference_id: "same-ref", description: "dup" },
+    }),
+  ));
+  check("6 parallel identical admin credits: 1 created, 5 duplicates", sameRefRaw.filter((r) => r.status === 201).length === 1 && sameRefRaw.filter((r) => r.status === 409).length === 5, sameRefRaw.map((r) => r.status));
   check("balance counted the reference once (11.00)", (await balance(alice.token, race.id)) === "11.00");
 }
 
 async function isolationSuite() {
-  console.log("\n[isolation] one user can never see or touch another user's accounts");
+  console.log("\n[isolation] one user can never see or debit another user's accounts");
   const alice = await newUser("iso_a");
   const bob = await newUser("iso_b");
   const aAcc = await newAccount(alice.token, "Alice private");
   const aAcc2 = await newAccount(alice.token, "Alice second");
   const bAcc = await newAccount(bob.token, "Bob private");
-  await tx(alice.token, aAcc.id, { type: "credit", amount: "100", reference_id: "seed" });
-  await tx(bob.token, bAcc.id, { type: "credit", amount: "50", reference_id: "seed" });
+  await credit(aAcc.id, "100", "seed");
+  await credit(bAcc.id, "50", "seed");
 
   const bobList = await call("GET", "/api/v1/accounts", { token: bob.token });
   check("bob's list contains only bob's account", bobList.json.data.length === 1 && bobList.json.data[0].id === bAcc.id, bobList.json);
@@ -278,37 +336,44 @@ async function isolationSuite() {
   expectError("bob cannot read alice's account by id", await call("GET", `/api/v1/accounts/${aAcc.id}`, { token: bob.token }), 404, "ACCOUNT_NOT_FOUND");
   expectError("GET /accounts/:id with invalid id", await call("GET", "/api/v1/accounts/not-a-uuid", { token: alice.token }), 400, "INVALID_ACCOUNT_ID");
   expectError("GET /accounts/:id without token", await call("GET", `/api/v1/accounts/${aAcc.id}`), 401, "UNAUTHENTICATED");
-  const ownOneUnknown = await call("GET", "/api/v1/accounts/3fa85f64-5717-4562-b3fc-2c963f66afa6", { token: bob.token });
-  const ownOneForeign = await call("GET", `/api/v1/accounts/${aAcc.id}`, { token: bob.token });
-  check("foreign account by id is indistinguishable from a non-existent one", JSON.stringify(ownOneUnknown.json) === JSON.stringify(ownOneForeign.json));
 
   expectError("bob cannot read alice's balance", await call("GET", `/api/v1/accounts/${aAcc.id}/balance`, { token: bob.token }), 404, "ACCOUNT_NOT_FOUND");
   expectError("bob cannot read alice's history", await call("GET", `/api/v1/accounts/${aAcc.id}/transactions`, { token: bob.token }), 404, "ACCOUNT_NOT_FOUND");
-  expectError("bob cannot credit alice's account", await tx(bob.token, aAcc.id, { type: "credit", amount: "1", reference_id: "h1" }), 404, "ACCOUNT_NOT_FOUND");
-  expectError("bob cannot debit alice's account", await tx(bob.token, aAcc.id, { type: "debit", amount: "1", reference_id: "h2" }), 404, "ACCOUNT_NOT_FOUND");
+  expectError("bob cannot credit alice's account", await withdraw(bob.token, aAcc.id, { type: "credit", amount: "1", reference_id: "h1" }), 403, "CREDIT_FORBIDDEN");
+  expectError("bob cannot debit alice's account", await withdraw(bob.token, aAcc.id, { type: "debit", amount: "1", reference_id: "h2" }), 404, "ACCOUNT_NOT_FOUND");
   expectError("bob cannot transfer out of alice's account", await call("POST", "/api/v1/transfers", { token: bob.token, body: { from_account_id: aAcc.id, to_account_id: bAcc.id, amount: "10", reference_id: "h3" } }), 404, "ACCOUNT_NOT_FOUND");
-  expectError("alice cannot transfer into bob's account", await call("POST", "/api/v1/transfers", { token: alice.token, body: { from_account_id: aAcc.id, to_account_id: bAcc.id, amount: "10", reference_id: "h4" } }), 404, "ACCOUNT_NOT_FOUND");
+
+  // Peer transfer IS allowed: alice → bob.
+  const peer = await call("POST", "/api/v1/transfers", {
+    token: alice.token,
+    body: { from_account_id: aAcc.id, to_account_id: bAcc.id, amount: "10", reference_id: "peer-1", description: "Lunch" },
+  });
+  check(
+    "alice can transfer into bob's account",
+    peer.status === 201 && peer.json.data.from_balance === "90.00" && peer.json.data.to_balance === null && peer.json.data.to_is_own === false,
+    peer.json,
+  );
+  check("bob received the peer transfer", (await balance(bob.token, bAcc.id)) === "60.00");
+  const lookup = await call("GET", `/api/v1/accounts/lookup/${bAcc.id}`, { token: alice.token });
+  check("lookup shows recipient without balance", lookup.status === 200 && lookup.json.data.owner_username === bob.username && lookup.json.data.name === "Bob private" && !("balance" in lookup.json.data), lookup.json);
+
   const unknown = await call("GET", "/api/v1/accounts/3fa85f64-5717-4562-b3fc-2c963f66afa6/balance", { token: bob.token });
   const foreign = await call("GET", `/api/v1/accounts/${aAcc.id}/balance`, { token: bob.token });
   check("foreign account is indistinguishable from a non-existent one", JSON.stringify(unknown.json) === JSON.stringify(foreign.json));
 
-  check("alice's balance untouched by all attempts", (await balance(alice.token, aAcc.id)) === "100.00");
-  check("bob's balance untouched by all attempts", (await balance(bob.token, bAcc.id)) === "50.00");
-  check("alice's history has only her seed transaction", (await call("GET", `/api/v1/accounts/${aAcc.id}/transactions`, { token: alice.token })).json.pagination.total_records === 1);
-
-  console.log("\n[transfers] atomic debit + credit between the caller's own accounts");
+  console.log("\n[transfers] atomic debit + credit (own accounts + peer)");
   const body = (o = {}) => ({ from_account_id: aAcc.id, to_account_id: aAcc2.id, amount: "30.00", description: "Rent share", reference_id: "xfer-001", ...o });
-  await tx(alice.token, aAcc2.id, { type: "credit", amount: "50", reference_id: "seed" });
-  // aAcc = 100, aAcc2 = 50  ->  transfer 30 => 70 / 80
+  await credit(aAcc2.id, "50", "seed");
+  // aAcc = 90, aAcc2 = 50  ->  transfer 30 => 60 / 80
   const t1 = await call("POST", "/api/v1/transfers", { token: alice.token, body: body() });
-  check("transfer 30 from 100/50 -> 70/80", t1.status === 201 && t1.json.data.from_balance === "70.00" && t1.json.data.to_balance === "80.00" && t1.json.data.debit_transaction_id && t1.json.data.credit_transaction_id, t1.json);
-  check("balances persisted", (await balance(alice.token, aAcc.id)) === "70.00" && (await balance(alice.token, aAcc2.id)) === "80.00");
+  check("transfer 30 from 90/50 -> 60/80", t1.status === 201 && t1.json.data.from_balance === "60.00" && t1.json.data.to_balance === "80.00" && t1.json.data.to_is_own === true, t1.json);
+  check("balances persisted", (await balance(alice.token, aAcc.id)) === "60.00" && (await balance(alice.token, aAcc2.id)) === "80.00");
   const hist = await call("GET", `/api/v1/accounts/${aAcc2.id}/transactions?type=credit`, { token: alice.token });
   check("credit leg visible in destination history", hist.json.data[0].amount === "30.00" && hist.json.data[0].transfer_id === t1.json.data.id, hist.json);
   expectError("duplicate transfer reference", await call("POST", "/api/v1/transfers", { token: alice.token, body: body() }), 409, "DUPLICATE_TRANSACTION");
-  check("duplicate transfer moved no money", (await balance(alice.token, aAcc.id)) === "70.00" && (await balance(alice.token, aAcc2.id)) === "80.00");
+  check("duplicate transfer moved no money", (await balance(alice.token, aAcc.id)) === "60.00" && (await balance(alice.token, aAcc2.id)) === "80.00");
   expectError("transfer exceeding source balance", await call("POST", "/api/v1/transfers", { token: alice.token, body: body({ amount: "1000", reference_id: "xfer-2" }) }), 422, "INSUFFICIENT_BALANCE");
-  check("failed transfer fully rolled back", (await balance(alice.token, aAcc.id)) === "70.00" && (await balance(alice.token, aAcc2.id)) === "80.00");
+  check("failed transfer fully rolled back", (await balance(alice.token, aAcc.id)) === "60.00" && (await balance(alice.token, aAcc2.id)) === "80.00");
   expectError("same-account transfer", await call("POST", "/api/v1/transfers", { token: alice.token, body: body({ to_account_id: aAcc.id, reference_id: "xfer-3" }) }), 422, "SAME_ACCOUNT_TRANSFER");
   expectError("transfer invalid amount", await call("POST", "/api/v1/transfers", { token: alice.token, body: body({ amount: "0", reference_id: "xfer-4" }) }), 400, "INVALID_AMOUNT");
   expectError("transfer invalid account id", await call("POST", "/api/v1/transfers", { token: alice.token, body: body({ from_account_id: "nope", reference_id: "xfer-5" }) }), 400, "INVALID_ACCOUNT_ID");
@@ -323,7 +388,35 @@ async function isolationSuite() {
   ]);
   check("opposing concurrent transfers do not deadlock", opposite.every((r) => r.status === 201), opposite.map((r) => r.status));
   const total = Number(await balance(alice.token, aAcc.id)) + Number(await balance(alice.token, aAcc2.id));
-  check("money is conserved (70 + 80 = 150)", total === 150, total);
+  check("money is conserved (60 + 80 = 140)", total === 140, total);
+}
+
+async function adminSuite() {
+  console.log("\n[admin] env login, list all accounts, credit-only");
+  const login = await adminLogin();
+  check("admin login -> 200 + token + cookie", login.status === 200 && login.json.data.token.startsWith("lf_") && /lf_admin=/.test(login.headers.get("set-cookie") ?? ""), login.json);
+  expectError("admin wrong password", await call("POST", "/api/v1/admin/login", { body: { username: ADMIN_USERNAME, password: "nope-nope-1" } }), 401, "INVALID_CREDENTIALS");
+  expectError("admin accounts without token", await call("GET", "/api/v1/admin/accounts"), 401, "UNAUTHENTICATED");
+
+  const user = await newUser("adm");
+  const acc = await newAccount(user.token, "Fund me");
+  const list = await call("GET", "/api/v1/admin/accounts?limit=100", { token: adminToken });
+  check("admin list includes the new account", list.status === 200 && list.json.data.some((a) => a.id === acc.id && a.owner_username === user.username), list.json);
+
+  const credited = await credit(acc.id, "250.50", `admin-${run}`);
+  check("admin credit lands", credited.balance === "250.50" && (await balance(user.token, acc.id)) === "250.50", credited);
+
+  // Admin has no withdraw / transfer endpoints — user APIs still reject admin token as a normal session.
+  expectError("admin token is not a user session", await call("GET", "/api/v1/accounts", { token: adminToken }), 401, "UNAUTHENTICATED");
+  expectError("user token cannot hit admin credit", await call("POST", `/api/v1/admin/accounts/${acc.id}/credit`, {
+    token: user.token,
+    body: { amount: "1", reference_id: "nope" },
+  }), 401, "UNAUTHENTICATED");
+
+  const out = await call("POST", "/api/v1/admin/logout", { token: adminToken });
+  check("admin logout -> 200 + clears cookie", out.status === 200 && /lf_admin=;/.test(out.headers.get("set-cookie") ?? ""), out.headers.get("set-cookie"));
+  expectError("admin token unusable after logout", await call("GET", "/api/v1/admin/me", { token: adminToken }), 401, "UNAUTHENTICATED");
+  adminToken = null; // force re-login if later suites need it
 }
 
 async function healthSuite() {
@@ -346,6 +439,8 @@ async function pagesSuite() {
   }
   check("/login is reachable signed out", (await page("/login")).status === 200);
   check("/register is reachable signed out", (await page("/register")).status === 200);
+  check("/admin/login is reachable signed out", (await page("/admin/login")).status === 200);
+  check("signed out /admin -> /admin/login", redirectsTo(await page("/admin"), "/admin/login"));
   check("/health stays public", (await page("/health")).status === 200);
 
   const forged = await page("/dashboard", "lf_session=lf_forged");
@@ -371,6 +466,7 @@ try {
     await healthSuite();
     await authSuite();
     await accountsSuite();
+    await adminSuite();
     await ledgerSuite();
     await isolationSuite();
   }

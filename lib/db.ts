@@ -30,6 +30,11 @@ function mapDbError(error: PostgrestLikeError): Error {
         "INVALID_AMOUNT",
         "Amount must be greater than 0 with at most 2 decimal places",
       );
+    case "LF005":
+      return new AppError(
+        "CREDIT_FORBIDDEN",
+        "Only an administrator can add money to an account",
+      );
     default:
       console.error("[db] unexpected error", error);
       return new Error("Database error");

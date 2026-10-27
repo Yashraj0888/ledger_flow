@@ -1,38 +1,69 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { ADMIN_COOKIE, lookupAdminSession } from "@/lib/auth/admin";
 import { SESSION_COOKIE, lookupSession } from "@/lib/auth/session";
 
 /**
- * Page-level gatekeeper (Next.js 16 "proxy", formerly "middleware").
+ * Page-level gatekeeper (Next.js 16 "proxy").
  *
- * - Anyone without a *valid* session is sent to /login, whatever page they ask for.
- * - A signed-in user opening /login or /register is sent to the dashboard.
- * - The session is verified against the database (not just "a cookie exists"),
- *   so expired, revoked or forged cookies are rejected and cleared.
+ * User area (`/dashboard`, `/accounts`, `/transfer`, …):
+ *   - no valid user session → /login
+ *   - signed-in user on /login or /register → /dashboard
  *
- * API routes are not matched here: they answer 401 JSON through `requireAuth`,
- * which is the real authorisation boundary. This proxy only decides which
- * *pages* a visitor may open.
+ * Admin area (`/admin/...`):
+ *   - /admin/login is public; a valid admin session is redirected to /admin
+ *   - every other /admin page needs a valid admin session
+ *
+ * Sessions are verified against the database (forged/expired/revoked cookies
+ * are rejected and cleared). API routes are not matched here.
  */
-const PUBLIC_PAGES = new Set(["/login", "/register"]);
+const USER_PUBLIC = new Set(["/login", "/register"]);
 
 type SessionState = "valid" | "invalid" | "unknown";
 
-async function sessionState(token: string | undefined): Promise<SessionState> {
+async function userState(token: string | undefined): Promise<SessionState> {
   if (!token) return "invalid";
   try {
     return (await lookupSession(token)) ? "valid" : "invalid";
   } catch (error) {
-    // Database unreachable: fail closed for protected pages, but do not log the user out.
-    console.error("[proxy] session lookup failed", error);
+    console.error("[proxy] user session lookup failed", error);
+    return "unknown";
+  }
+}
+
+async function adminState(token: string | undefined): Promise<SessionState> {
+  if (!token) return "invalid";
+  try {
+    return (await lookupAdminSession(token)) ? "valid" : "invalid";
+  } catch (error) {
+    console.error("[proxy] admin session lookup failed", error);
     return "unknown";
   }
 }
 
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
-  const isPublic = PUBLIC_PAGES.has(pathname);
+  const isAdminPath = pathname === "/admin" || pathname.startsWith("/admin/");
+
+  if (isAdminPath) {
+    const token = request.cookies.get(ADMIN_COOKIE)?.value;
+    const state = await adminState(token);
+    const isLogin = pathname === "/admin/login";
+
+    if (state === "valid") {
+      if (isLogin) return NextResponse.redirect(new URL("/admin", request.url));
+      return NextResponse.next();
+    }
+
+    if (isLogin) return NextResponse.next();
+
+    const response = NextResponse.redirect(new URL("/admin/login", request.url));
+    if (state === "invalid" && token) response.cookies.delete(ADMIN_COOKIE);
+    return response;
+  }
+
   const token = request.cookies.get(SESSION_COOKIE)?.value;
-  const state = await sessionState(token);
+  const state = await userState(token);
+  const isPublic = USER_PUBLIC.has(pathname);
 
   if (state === "valid") {
     if (isPublic || pathname === "/") {
@@ -49,6 +80,5 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  // Pages only: skip API routes, health check, Next internals and any file with an extension.
   matcher: ["/((?!api|health|_next/static|_next/image|_next/webpack-hmr|favicon.ico|.*\\..*).*)"],
 };

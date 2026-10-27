@@ -126,7 +126,24 @@ export interface TransferResult {
   reference_id: string;
   created_at: string;
   from_balance: string;
-  to_balance: string;
+  /** Null when the destination belongs to someone else (privacy). */
+  to_balance: string | null;
+  to_is_own: boolean;
+}
+
+export interface AccountLookup {
+  id: string;
+  name: string;
+  owner_username: string;
+}
+
+export interface AdminAccount {
+  id: string;
+  name: string;
+  balance: string;
+  created_at: string;
+  owner_id: string;
+  owner_username: string;
 }
 
 /** Fetch every account of the logged-in user (follows pagination). */

@@ -27,7 +27,7 @@ Keep in sync with [plan.md](plan.md). **This file is documentation only — no i
 | Timestamps | ISO-8601 UTC with milliseconds (`created_at`) |
 | Pagination | `page` (default `1`), `limit` (default `20`, max `100`) |
 | Sorting (history) | Latest first: `created_at DESC`, then `id DESC` |
-| Authentication | Every endpoint except `register`, `login` and `/health` requires a Bearer token or the session cookie |
+| Authentication | Every endpoint except `register`, `login`, `admin/login` and `/health` requires a session |
 | Route handlers | `app/api/v1/.../route.ts` (Next.js) |
 
 ### Authentication & data isolation
@@ -38,10 +38,12 @@ Keep in sync with [plan.md](plan.md). **This file is documentation only — no i
 - Login also sets the same token as an **`lf_session` cookie** (`HttpOnly`, `SameSite=Strict`, `Path=/`,
   `Secure` in production, 8 h). The web app uses only the cookie, so the token is never readable by
   JavaScript. If both are sent, the `Authorization` header wins. Logout revokes the session and clears the cookie.
-- **A user can only see and operate on their own accounts.** Every account, balance, history,
-  transaction and transfer endpoint is scoped to the authenticated user.
-- An account id belonging to another user is reported as `404 ACCOUNT_NOT_FOUND` — exactly the same
-  response as an id that does not exist — so account ids of other users cannot be probed.
+- **A user can only see and operate on their own accounts** (except peer transfers: destination may be
+  anyone's). Reading another user's account/balance/history is `404 ACCOUNT_NOT_FOUND`.
+- **Users cannot add money.** `POST …/transactions` with `type: "credit"` returns `403 CREDIT_FORBIDDEN`.
+  Only the env-configured admin may credit accounts.
+- **Admin** (`ADMIN_USERNAME` / `ADMIN_PASSWORD`): separate `lf_admin` cookie; can list every account and
+  credit any of them. Cannot withdraw or transfer. Admin tokens are rejected by user APIs (and vice versa).
 - Passwords and MPINs are never stored in plain text (scrypt + server-side pepper) and are never returned.
 - 5 consecutive failed logins (password or MPIN) lock the user for 15 minutes (`429 TOO_MANY_ATTEMPTS`).
 
@@ -94,9 +96,10 @@ List with pagination:
 | `INVALID_TRANSACTION_TYPE` | 400 | `type` not `credit` or `debit` |
 | `INVALID_AMOUNT` | 400 | Not a number, `<= 0`, more than 2 decimal places, overflow |
 | `INVALID_PAGINATION` | 400 | `page`/`limit` non-integer, `< 1`, `limit > 100`, or `page` too large |
-| `UNAUTHENTICATED` | 401 | Missing, malformed, unknown, expired or revoked bearer token |
-| `INVALID_CREDENTIALS` | 401 | Unknown username or wrong password/MPIN (same response for both) |
-| `ACCOUNT_NOT_FOUND` | 404 | Well-formed UUID, account does not exist **or belongs to another user** |
+| `UNAUTHENTICATED` | 401 | Missing, malformed, unknown, expired or revoked bearer/admin token |
+| `INVALID_CREDENTIALS` | 401 | Unknown username or wrong password/MPIN/admin password (same response) |
+| `CREDIT_FORBIDDEN` | 403 | User tried to credit an account; only admin may add money |
+| `ACCOUNT_NOT_FOUND` | 404 | Well-formed UUID, account does not exist **or is not visible to the caller** |
 | `ROUTE_NOT_FOUND` | 404 | Unknown path |
 | `TRANSACTION_IMMUTABLE` | 405 | Attempt to update or delete a transaction |
 | `USERNAME_TAKEN` | 409 | Registration with an existing username (case-insensitive) |
@@ -116,16 +119,23 @@ Authentication
 - [x] [Current user](#3-current-user) — `GET /auth/me`
 - [x] [Logout](#4-logout) — `POST /auth/logout`
 
-Ledger (all require login; all scoped to the logged-in user)
+Ledger (require user login; scoped to the logged-in user unless noted)
 - [x] [Create Account](#5-create-account) — `POST /accounts`
 - [x] [List My Accounts](#6-list-my-accounts) — `GET /accounts`
 - [x] [Get One Account](#6a-get-one-account) — `GET /accounts/:accountId`
-- [x] [Add Transaction](#7-add-transaction) — `POST /accounts/:accountId/transactions`
+- [x] [Lookup Account](#6b-lookup-account) — `GET /accounts/lookup/:accountId` (peer transfer helper)
+- [x] [Withdraw](#7-withdraw) — `POST /accounts/:accountId/transactions` (debit only)
 - [x] [Get Account Balance](#8-get-account-balance) — `GET /accounts/:accountId/balance`
 - [x] [Get Transaction History](#9-get-transaction-history) — `GET /accounts/:accountId/transactions`
 - [x] [Immutability](#10-transaction-immutability) — reject PUT/PATCH/DELETE on transactions
 - [x] [Health](#11-health) — `GET /health`
-- [x] [Money Transfer (Bonus)](#12-money-transfer-bonus) — `POST /transfers`
+- [x] [Money Transfer](#12-money-transfer-bonus) — `POST /transfers` (own or peer destination)
+
+Admin (env credentials; `lf_admin` cookie; credit only)
+- [x] [Admin login](#13-admin) — `POST /admin/login`
+- [x] [Admin me / logout](#13-admin) — `GET /admin/me`, `POST /admin/logout`
+- [x] [List all accounts](#13-admin) — `GET /admin/accounts`
+- [x] [Credit account](#13-admin) — `POST /admin/accounts/:accountId/credit`
 
 ---
 
@@ -424,37 +434,64 @@ Returns a single account owned by the logged-in user (used by the web app for th
 
 ---
 
-## 7. Add Transaction
+## 6b. Lookup Account
+
+**Status:** - [x] Done
+
+`GET /api/v1/accounts/lookup/:accountId` — requires login
+
+Helper for peer transfers: confirms an account exists and returns its **name** and owner username.
+Never returns balance.
+
+### Success — `200 OK`
+
+```json
+{
+  "data": {
+    "id": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+    "name": "Savings",
+    "owner_username": "alice"
+  }
+}
+```
+
+### Errors
+
+| Status | Code | Case |
+|---|---|---|
+| 401 | `UNAUTHENTICATED` | Not logged in |
+| 400 | `INVALID_ACCOUNT_ID` | not a UUID |
+| 404 | `ACCOUNT_NOT_FOUND` | no such account |
+
+---
+
+## 7. Withdraw
 
 **Status:** - [x] Done
 
 `POST /api/v1/accounts/:accountId/transactions` — requires login
 
-Adds a credit or debit to one of **your** accounts. Creating the transaction and updating the balance is **atomic**.
+**Users may only withdraw (debit).** Credits are admin-only — see [Admin](#13-admin).
+Creating the debit and updating the balance is **atomic**.
 
-### Path params
-
-| Param | Type | Notes |
-|---|---|---|
-| `accountId` | UUID | Must exist **and belong to the logged-in user** |
-
-### Request
+Preferred body (no `type`):
 
 ```json
 {
-  "type": "credit",
-  "amount": "50.00",
-  "description": "Salary",
-  "reference_id": "pay-2026-10"
+  "amount": "30.00",
+  "description": "ATM",
+  "reference_id": "wd-2026-10"
 }
 ```
 
+Legacy body still accepted: `{ "type": "debit", "amount": "...", "reference_id": "...", "description": "..." }`.
+Sending `"type": "credit"` returns **`403 CREDIT_FORBIDDEN`**.
+
 | Field | Type | Required | Notes |
 |---|---|---|---|
-| `type` | `"credit"` \| `"debit"` | yes | |
 | `amount` | number or numeric string | yes | `> 0`, max 2 decimal places |
-| `description` | string | no | Max 500. May be empty/null |
-| `reference_id` | string | yes | Non-empty after trim. Unique **per account**. Max 128 |
+| `description` | string | no | Max 500 |
+| `reference_id` | string | yes | Unique **per account**. Max 128 |
 
 ### Success — `201 Created`
 
@@ -463,56 +500,24 @@ Adds a credit or debit to one of **your** accounts. Creating the transaction and
   "data": {
     "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
     "account_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-    "type": "credit",
-    "amount": "50.00",
-    "description": "Salary",
-    "reference_id": "pay-2026-10",
+    "type": "debit",
+    "amount": "30.00",
+    "description": "ATM",
+    "reference_id": "wd-2026-10",
     "transfer_id": null,
     "created_at": "2026-10-27T14:30:00.000Z",
-    "balance": "50.00"
+    "balance": "70.00"
   }
 }
 ```
-
-`balance` is the account balance **after** this transaction.
-
-### Credit rule
-
-Current `100` + credit `50` → new balance `150`.
 
 ### Debit rule
 
-Current `100` − debit `30` → new balance `70`.
-
-Debit of `150` on balance `100` → **rejected**, balance remains `100`.
+Current `100` − debit `30` → new balance `70`. Debit of `150` on balance `100` → **rejected**, balance stays `100`.
 
 ### Duplicate `reference_id` (same account)
 
-- New transaction **must not** be created
-- Balance **must not** change
-- Response: `409 Conflict` with existing transaction
-
-```json
-{
-  "error": {
-    "code": "DUPLICATE_TRANSACTION",
-    "message": "A transaction with this reference_id already exists for this account",
-    "details": {
-      "existing_transaction": {
-        "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
-        "account_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-        "type": "credit",
-        "amount": "50.00",
-        "description": "Salary",
-        "reference_id": "pay-2026-10",
-        "transfer_id": null,
-        "created_at": "2026-10-27T14:30:00.000Z"
-      }
-    }
-  }
-}
-```
-
+`409 DUPLICATE_TRANSACTION` with the existing transaction in `details`; balance unchanged.
 Same `reference_id` on a **different** account is allowed.
 
 ### Errors
@@ -521,23 +526,20 @@ Same `reference_id` on a **different** account is allowed.
 |---|---|---|
 | 401 | `UNAUTHENTICATED` | Not logged in |
 | 400 | `INVALID_ACCOUNT_ID` | `accountId` not a UUID |
-| 400 | `INVALID_TRANSACTION_TYPE` | `type` not credit/debit |
 | 400 | `INVALID_AMOUNT` | amount invalid / `<= 0` / too many decimals |
-| 400 | `VALIDATION_ERROR` | missing `type` / `amount` / `reference_id`, unknown field, bad body |
-| 404 | `ACCOUNT_NOT_FOUND` | account does not exist **or belongs to another user** |
+| 400 | `VALIDATION_ERROR` | missing fields / bad body |
+| 403 | `CREDIT_FORBIDDEN` | body had `type: "credit"` |
+| 404 | `ACCOUNT_NOT_FOUND` | account missing **or not yours** |
 | 409 | `DUPLICATE_TRANSACTION` | same `reference_id` on this account |
 | 422 | `INSUFFICIENT_BALANCE` | debit exceeds balance |
 
 ### Behaviors
 
-- [x] Credit increases balance
-- [x] Debit decreases balance
-- [x] Debit rejected when insufficient; balance unchanged
-- [x] Duplicate same account → 409, no new row, balance unchanged
-- [x] Same `reference_id` on different accounts allowed
-- [x] Create + balance update is atomic (rollback on any failure)
-- [x] Failed/rejected transaction does not affect balance
-- [x] Cannot credit/debit an account owned by another user (404)
+- [x] Debit decreases balance; insufficient → 422, unchanged
+- [x] User credit → 403 `CREDIT_FORBIDDEN` (also enforced in SQL)
+- [x] Duplicate same account → 409; same reference on other accounts OK
+- [x] Create + balance update is atomic
+- [x] Cannot debit another user's account (404)
 - [x] Concurrent debits never overdraw; concurrent identical `reference_id` creates exactly one row
 
 ### curl
@@ -546,7 +548,7 @@ Same `reference_id` on a **different** account is allowed.
 curl -s -X POST http://localhost:3000/api/v1/accounts/{accountId}/transactions \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"type":"credit","amount":"50.00","description":"Salary","reference_id":"pay-2026-10"}'
+  -d '{"amount":"30.00","description":"ATM","reference_id":"wd-2026-10"}'
 ```
 
 ---
@@ -759,9 +761,10 @@ curl -s http://localhost:3000/health
 
 `POST /api/v1/transfers` — requires login
 
-Moves money between **two of your own accounts**. Implemented as an atomic debit on the source and
-credit on the destination. Partial transfers are never possible. Both accounts must belong to the
-logged-in user; otherwise the response is `404 ACCOUNT_NOT_FOUND`.
+Moves money from **one of your accounts** to another account — yours **or** someone else's.
+Atomic debit on the source + credit on the destination. Partial transfers are never possible.
+Source must be yours; destination must exist and differ from source. Missing/foreign **source** →
+`404 ACCOUNT_NOT_FOUND`. Missing destination → same.
 
 ### Request
 
@@ -777,21 +780,13 @@ logged-in user; otherwise the response is `404 ACCOUNT_NOT_FOUND`.
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
-| `from_account_id` | UUID | yes | Source; must be yours; must have sufficient balance |
-| `to_account_id` | UUID | yes | Destination; must be yours; must differ from source |
+| `from_account_id` | UUID | yes | Source; **must be yours**; sufficient balance |
+| `to_account_id` | UUID | yes | Destination; yours or peer; must differ from source |
 | `amount` | number or numeric string | yes | `> 0`, max 2 decimals |
 | `description` | string | no | Applied to both ledger legs |
-| `reference_id` | string | yes | Unique for the source account (shared with its transactions) |
+| `reference_id` | string | yes | Unique for the source account |
 
-The two legs appear in each account's history: the debit uses your `reference_id`; the credit
-uses `transfer:<transfer_id>`. Both carry `transfer_id`.
-
-### Example
-
-| | Before | Transfer | After |
-|---|---|---|---|
-| Account A | 100 | −30 | 70 |
-| Account B | 50 | +30 | 80 |
+The debit uses your `reference_id`; the credit uses `transfer:<transfer_id>`. Both carry `transfer_id`.
 
 ### Success — `201 Created`
 
@@ -807,11 +802,14 @@ uses `transfer:<transfer_id>`. Both carry `transfer_id`.
     "created_at": "2026-10-27T17:00:00.000Z",
     "from_balance": "70.00",
     "to_balance": "80.00",
+    "to_is_own": true,
     "debit_transaction_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
     "credit_transaction_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
   }
 }
 ```
+
+For a peer destination, `to_is_own` is `false` and `to_balance` is `null` (balance privacy).
 
 ### Errors
 
@@ -821,19 +819,17 @@ uses `transfer:<transfer_id>`. Both carry `transfer_id`.
 | 400 | `INVALID_ACCOUNT_ID` | either id not a UUID |
 | 400 | `INVALID_AMOUNT` | invalid amount |
 | 400 | `VALIDATION_ERROR` | missing fields / bad body |
-| 404 | `ACCOUNT_NOT_FOUND` | source or destination missing **or not yours** |
-| 409 | `DUPLICATE_TRANSACTION` | duplicate `reference_id` for source (existing transaction in `details`) |
+| 404 | `ACCOUNT_NOT_FOUND` | source missing/not yours, or destination missing |
+| 409 | `DUPLICATE_TRANSACTION` | duplicate `reference_id` for source |
 | 422 | `INSUFFICIENT_BALANCE` | source cannot cover amount |
 | 422 | `SAME_ACCOUNT_TRANSFER` | source === destination |
 
 ### Behaviors
 
-- [x] Source must have sufficient balance
-- [x] Both accounts must exist
-- [x] Both accounts must belong to the logged-in user
-- [x] Debit + credit happen atomically
-- [x] Any failure rolls back the entire transfer
-- [x] Partial transfer never possible
+- [x] Source must be yours with sufficient balance
+- [x] Destination may be yours or another user's
+- [x] Peer `to_balance` is withheld (`null`)
+- [x] Debit + credit atomic; any failure rolls back; no partial transfer
 - [x] Source ≠ destination
 - [x] Concurrent opposing transfers do not deadlock
 
@@ -848,10 +844,62 @@ curl -s -X POST http://localhost:3000/api/v1/transfers \
 
 ---
 
+## 13. Admin
+
+**Status:** - [x] Done
+
+Credentials live only in env (`ADMIN_USERNAME`, `ADMIN_PASSWORD`) — not a `users` row.
+Successful login returns a token and sets the **`lf_admin`** HttpOnly cookie. Admin can **only credit**.
+
+| Method | Path | Notes |
+|---|---|---|
+| `POST` | `/admin/login` | `{ "username", "password" }` → `{ data: { token, username } }` + `Set-Cookie: lf_admin` |
+| `GET` | `/admin/me` | `{ data: { username } }` |
+| `POST` | `/admin/logout` | revokes + clears cookie |
+| `GET` | `/admin/accounts?page=&limit=` | every account with `owner_id`, `owner_username`, balance |
+| `POST` | `/admin/accounts/:accountId/credit` | the only way new money enters the ledger |
+
+### Credit request
+
+```json
+{
+  "amount": "100.00",
+  "description": "Opening deposit",
+  "reference_id": "admin-open-1"
+}
+```
+
+Success `201` shape matches a normal transaction plus `balance` after the credit.
+
+### Behaviors
+
+- [x] Wrong admin credentials → `401 INVALID_CREDENTIALS`
+- [x] User session cannot call admin routes (`401`)
+- [x] Admin session cannot call user ledger routes (`401`)
+- [x] Credit any existing account; missing id → `404`
+- [x] Duplicate `reference_id` on that account → `409`
+- [x] No admin withdraw or transfer endpoints
+
+### curl
+
+```bash
+curl -s -X POST http://localhost:3000/api/v1/admin/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"$ADMIN_PASSWORD"}'
+
+curl -s -X POST http://localhost:3000/api/v1/admin/accounts/{accountId}/credit \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"amount":"100.00","description":"Opening deposit","reference_id":"admin-open-1"}'
+```
+
+---
+
 ## Data Integrity Notes (cross-cutting)
 
 - [x] Account balance always reflects all **valid** transactions for that account
-- [x] Spec example: credits 100 + 50, debits 30 + 20 → balance `100.00`
+- [x] Spec example: admin credits 100 + 50, user debits 30 + 20 → balance `100.00`
+- [x] User self-credit blocked at API and in SQL (`CREDIT_FORBIDDEN`)
 - [x] Rejected/failed transactions never change balance
 - [x] Transactions are immutable after creation
 - [x] DB constraints: `UNIQUE(account_id, reference_id)`, `amount > 0`, `balance >= 0`, type enum

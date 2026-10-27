@@ -20,7 +20,7 @@ export function NewAccountModal({ open, onClose, onCreated }: Props) {
       open={open}
       onClose={onClose}
       title="Open a new account"
-      description="It starts with a balance of zero. Add money once it's created."
+      description="It starts at zero. An admin must credit it before you can spend or transfer."
     >
       <NewAccountForm onClose={onClose} onCreated={onCreated} />
     </Modal>

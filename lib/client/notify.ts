@@ -21,6 +21,11 @@ const TITLES: Record<string, { title: string; hint?: string }> = {
   USERNAME_TAKEN: { title: "Username taken", hint: "Pick a different username." },
   ACCOUNT_NOT_FOUND: { title: "Account not found" },
   SAME_ACCOUNT_TRANSFER: { title: "Pick two different accounts" },
+  CREDIT_FORBIDDEN: {
+    title: "Only an admin can add money",
+    hint: "Ask an administrator to credit this account, or receive a transfer.",
+  },
+  FORBIDDEN: { title: "Not allowed" },
   INVALID_AMOUNT: { title: "Invalid amount" },
   VALIDATION_ERROR: { title: "Please check the form" },
   NETWORK_ERROR: { title: "You're offline", hint: "Check your connection and retry." },

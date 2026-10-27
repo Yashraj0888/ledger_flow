@@ -33,7 +33,9 @@ Working checklist for the Transaction Ledger API (with per-user login).
   - Passwords/MPIN: scrypt + server-side pepper (`AUTH_PEPPER`). 5 failed logins → 15 min lock.
 - **Isolation:** every account belongs to one user; every ledger function takes the authenticated `user_id`
   and filters by ownership. Foreign account ids answer `404 ACCOUNT_NOT_FOUND` (indistinguishable from missing).
-- **Transfers are between the caller's own accounts** (both must be theirs). Cross-user transfers are out of scope.
+- **Transfers:** source must be yours; destination may be yours or another user's account.
+  Foreign destination balances are not returned (`to_balance: null`). Users cannot self-credit —
+  only the env admin can add money (`CREDIT_FORBIDDEN` on user credit).
 - `account_id` lives in the URL path for account-scoped routes.
 - Duplicate `reference_id` (same account): `409 DUPLICATE_TRANSACTION`, existing tx in details; balance unchanged.
 - Insufficient balance: `422 INSUFFICIENT_BALANCE`.
@@ -128,24 +130,27 @@ docs/  (API.md, plan.md, assessment)
 - [x] `AuthProvider`: restores the session from the cookie, handles 401 anywhere (toast + redirect), login/register/logout toasts
 - [x] Public pages: landing `/`, `/login` (Password | MPIN tabs), `/register` (strength meter, MPIN confirm, auto-login)
 - [x] Guarded pages: `/dashboard` (totals, account cards, new-account modal), `/accounts/[accountId]`
-      (balance hero, add money / withdraw modal, filterable + paginated history, copy id), `/transfer`
-      (own accounts only, swap, live "balances after" preview, success card)
+      (balance hero, withdraw + transfer, filterable + paginated history, copy id), `/transfer`
+      (own accounts or peer by account ID, live preview, success card)
+- [x] Admin: env credentials, `/admin/login` + `/admin` credit console; users cannot self-credit;
+      peer transfers allowed; admin cannot withdraw/transfer
 - [x] Toasts for every outcome; server error codes are mapped to friendly messages (`lib/client/notify.ts`)
 - [x] Client checks are convenience only; every rule is re-enforced by the API and database
-- [x] Verified in the browser: register, password + MPIN login, account create, credit, debit, overdraft message,
-      transfer, logout, route guard, foreign-account screen, mobile width, light theme
+- [x] Verified in the browser: register, password + MPIN login, account create, admin credit, withdraw,
+      peer transfer, logout, route guard, foreign-account screen, admin console, light theme
 
 ## Phase 4 — Testing
 
-- [x] `scripts/e2e.mjs`: offline checks (auth gating, validation, 405, 404) — 19/19 passing
+- [x] `scripts/e2e.mjs`: offline checks (auth gating, validation, 405, 404)
 - [x] DB-level suite (see Phase 1)
-- [x] `npm run test:e2e` full run (auth, cookie sessions, lockout + reset, walkthrough, isolation, 10 parallel
-      debits, parallel duplicates, transfers, opposing transfers) + page gate (proxy) — 146/146 passing
+- [x] `npm run test:e2e` full run (auth, cookie sessions, lockout + reset, admin login/credit,
+      user self-credit forbidden, walkthrough via admin credits, isolation, peer transfers,
+      parallel debits/admin credits, page gate) — 157/157 passing
 
 ## Phase 5 — AWS hosting
 
 - [ ] Amplify Hosting (or ECS/Fargate + ALB)
-- [ ] Env vars in AWS: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `AUTH_PEPPER`
+- [ ] Env vars in AWS: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `AUTH_PEPPER`, `ADMIN_USERNAME`, `ADMIN_PASSWORD`
 - [ ] Deploy production build, smoke-test against API.md curls, `/health` as health check
 
 ## Phase 6 — Submission pack (assessment §11)
