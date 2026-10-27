@@ -40,10 +40,9 @@ Keep in sync with [plan.md](plan.md). **This file is documentation only — no i
   JavaScript. If both are sent, the `Authorization` header wins. Logout revokes the session and clears the cookie.
 - **A user can only see and operate on their own accounts** (except peer transfers: destination may be
   anyone's). Reading another user's account/balance/history is `404 ACCOUNT_NOT_FOUND`.
-- **Users cannot add money.** `POST …/transactions` with `type: "credit"` returns `403 CREDIT_FORBIDDEN`.
-  Only the env-configured admin may credit accounts.
-- **Admin** (`ADMIN_USERNAME` / `ADMIN_PASSWORD`): separate `lf_admin` cookie; can list every account and
-  credit any of them. Cannot withdraw or transfer. Admin tokens are rejected by user APIs (and vice versa).
+- Users may **credit or debit** their own accounts via `POST …/transactions`.
+- **Admin** (optional): env credentials + `lf_admin` cookie; can list every account and credit any of them.
+  Cannot withdraw or transfer. Admin tokens are rejected by user APIs (and vice versa).
 - Passwords and MPINs are never stored in plain text (scrypt + server-side pepper) and are never returned.
 - 5 consecutive failed logins (password or MPIN) lock the user for 15 minutes (`429 TOO_MANY_ATTEMPTS`).
 
@@ -98,7 +97,6 @@ List with pagination:
 | `INVALID_PAGINATION` | 400 | `page`/`limit` non-integer, `< 1`, `limit > 100`, or `page` too large |
 | `UNAUTHENTICATED` | 401 | Missing, malformed, unknown, expired or revoked bearer/admin token |
 | `INVALID_CREDENTIALS` | 401 | Unknown username or wrong password/MPIN/admin password (same response) |
-| `CREDIT_FORBIDDEN` | 403 | User tried to credit an account; only admin may add money |
 | `ACCOUNT_NOT_FOUND` | 404 | Well-formed UUID, account does not exist **or is not visible to the caller** |
 | `ROUTE_NOT_FOUND` | 404 | Unknown path |
 | `TRANSACTION_IMMUTABLE` | 405 | Attempt to update or delete a transaction |
@@ -124,7 +122,7 @@ Ledger (require user login; scoped to the logged-in user unless noted)
 - [x] [List My Accounts](#6-list-my-accounts) — `GET /accounts`
 - [x] [Get One Account](#6a-get-one-account) — `GET /accounts/:accountId`
 - [x] [Lookup Account](#6b-lookup-account) — `GET /accounts/lookup/:accountId` (peer transfer helper)
-- [x] [Withdraw](#7-withdraw) — `POST /accounts/:accountId/transactions` (debit only)
+- [x] [Add Transaction](#7-add-transaction) — `POST /accounts/:accountId/transactions` (credit or debit)
 - [x] [Get Account Balance](#8-get-account-balance) — `GET /accounts/:accountId/balance`
 - [x] [Get Transaction History](#9-get-transaction-history) — `GET /accounts/:accountId/transactions`
 - [x] [Immutability](#10-transaction-immutability) — reject PUT/PATCH/DELETE on transactions
@@ -465,30 +463,29 @@ Never returns balance.
 
 ---
 
-## 7. Withdraw
+## 7. Add Transaction
 
 **Status:** - [x] Done
 
 `POST /api/v1/accounts/:accountId/transactions` — requires login
 
-**Users may only withdraw (debit).** Credits are admin-only — see [Admin](#13-admin).
-Creating the debit and updating the balance is **atomic**.
+Adds a **credit** or **debit** to one of **your** accounts. Creating the transaction and updating
+the balance is **atomic**.
 
-Preferred body (no `type`):
+### Request
 
 ```json
 {
-  "amount": "30.00",
-  "description": "ATM",
-  "reference_id": "wd-2026-10"
+  "type": "credit",
+  "amount": "50.00",
+  "description": "Salary",
+  "reference_id": "pay-2026-10"
 }
 ```
 
-Legacy body still accepted: `{ "type": "debit", "amount": "...", "reference_id": "...", "description": "..." }`.
-Sending `"type": "credit"` returns **`403 CREDIT_FORBIDDEN`**.
-
 | Field | Type | Required | Notes |
 |---|---|---|---|
+| `type` | `"credit"` \| `"debit"` | yes | |
 | `amount` | number or numeric string | yes | `> 0`, max 2 decimal places |
 | `description` | string | no | Max 500 |
 | `reference_id` | string | yes | Unique **per account**. Max 128 |
@@ -500,20 +497,21 @@ Sending `"type": "credit"` returns **`403 CREDIT_FORBIDDEN`**.
   "data": {
     "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
     "account_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-    "type": "debit",
-    "amount": "30.00",
-    "description": "ATM",
-    "reference_id": "wd-2026-10",
+    "type": "credit",
+    "amount": "50.00",
+    "description": "Salary",
+    "reference_id": "pay-2026-10",
     "transfer_id": null,
     "created_at": "2026-10-27T14:30:00.000Z",
-    "balance": "70.00"
+    "balance": "50.00"
   }
 }
 ```
 
-### Debit rule
+### Credit / debit rules
 
-Current `100` − debit `30` → new balance `70`. Debit of `150` on balance `100` → **rejected**, balance stays `100`.
+Current `100` + credit `50` → `150`. Current `100` − debit `30` → `70`.
+Debit of `150` on balance `100` → **rejected**, balance stays `100`.
 
 ### Duplicate `reference_id` (same account)
 
@@ -526,20 +524,20 @@ Same `reference_id` on a **different** account is allowed.
 |---|---|---|
 | 401 | `UNAUTHENTICATED` | Not logged in |
 | 400 | `INVALID_ACCOUNT_ID` | `accountId` not a UUID |
+| 400 | `INVALID_TRANSACTION_TYPE` | `type` not credit/debit |
 | 400 | `INVALID_AMOUNT` | amount invalid / `<= 0` / too many decimals |
 | 400 | `VALIDATION_ERROR` | missing fields / bad body |
-| 403 | `CREDIT_FORBIDDEN` | body had `type: "credit"` |
 | 404 | `ACCOUNT_NOT_FOUND` | account missing **or not yours** |
 | 409 | `DUPLICATE_TRANSACTION` | same `reference_id` on this account |
 | 422 | `INSUFFICIENT_BALANCE` | debit exceeds balance |
 
 ### Behaviors
 
-- [x] Debit decreases balance; insufficient → 422, unchanged
-- [x] User credit → 403 `CREDIT_FORBIDDEN` (also enforced in SQL)
+- [x] Credit increases balance; debit decreases it
+- [x] Debit rejected when insufficient; balance unchanged
 - [x] Duplicate same account → 409; same reference on other accounts OK
 - [x] Create + balance update is atomic
-- [x] Cannot debit another user's account (404)
+- [x] Cannot credit/debit another user's account (404)
 - [x] Concurrent debits never overdraw; concurrent identical `reference_id` creates exactly one row
 
 ### curl
@@ -548,7 +546,7 @@ Same `reference_id` on a **different** account is allowed.
 curl -s -X POST http://localhost:3000/api/v1/accounts/{accountId}/transactions \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"amount":"30.00","description":"ATM","reference_id":"wd-2026-10"}'
+  -d '{"type":"credit","amount":"50.00","description":"Salary","reference_id":"pay-2026-10"}'
 ```
 
 ---
@@ -857,7 +855,7 @@ Successful login returns a token and sets the **`lf_admin`** HttpOnly cookie. Ad
 | `GET` | `/admin/me` | `{ data: { username } }` |
 | `POST` | `/admin/logout` | revokes + clears cookie |
 | `GET` | `/admin/accounts?page=&limit=` | every account with `owner_id`, `owner_username`, balance |
-| `POST` | `/admin/accounts/:accountId/credit` | the only way new money enters the ledger |
+| `POST` | `/admin/accounts/:accountId/credit` | optional admin credit of any account |
 
 ### Credit request
 
@@ -898,8 +896,7 @@ curl -s -X POST http://localhost:3000/api/v1/admin/accounts/{accountId}/credit \
 ## Data Integrity Notes (cross-cutting)
 
 - [x] Account balance always reflects all **valid** transactions for that account
-- [x] Spec example: admin credits 100 + 50, user debits 30 + 20 → balance `100.00`
-- [x] User self-credit blocked at API and in SQL (`CREDIT_FORBIDDEN`)
+- [x] Spec example: credits 100 + 50, debits 30 + 20 → balance `100.00`
 - [x] Rejected/failed transactions never change balance
 - [x] Transactions are immutable after creation
 - [x] DB constraints: `UNIQUE(account_id, reference_id)`, `amount > 0`, `balance >= 0`, type enum

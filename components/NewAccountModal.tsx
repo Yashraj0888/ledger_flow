@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { AlertCircle, Landmark, Loader2, Plus } from "lucide-react";
+import Link from "next/link";
+import { AlertCircle, Check, Copy, Landmark, Loader2, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { Modal } from "@/components/Modal";
 import { api, ApiError, type Account } from "@/lib/client/api";
@@ -20,7 +21,7 @@ export function NewAccountModal({ open, onClose, onCreated }: Props) {
       open={open}
       onClose={onClose}
       title="Open a new account"
-      description="It starts at zero. An admin must credit it before you can spend or transfer."
+      description="It starts at zero. You'll get an account ID right away — add money, or share the ID for transfers."
     >
       <NewAccountForm onClose={onClose} onCreated={onCreated} />
     </Modal>
@@ -31,6 +32,7 @@ function NewAccountForm({ onClose, onCreated }: Omit<Props, "open">) {
   const [name, setName] = useState("");
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
+  const [created, setCreated] = useState<Account | null>(null);
 
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -43,16 +45,66 @@ function NewAccountForm({ onClose, onCreated }: Omit<Props, "open">) {
     setBusy(true);
     try {
       const { data } = await api<Account>("/accounts", { method: "POST", body: { name: trimmed } });
-      toast.success("Account created", {
-        description: `“${data.name}” is ready with a balance of ${formatMoney(data.balance)}.`,
-      });
+      setCreated(data);
       onCreated(data);
-      onClose();
+      toast.success("Account created", {
+        description: `Balance ${formatMoney(data.balance)}. Copy the account ID to receive money.`,
+      });
     } catch (err) {
       if (err instanceof ApiError && err.fieldErrors.name) setError(err.fieldErrors.name);
       notifyError(err, "Couldn't create the account");
       setBusy(false);
     }
+  }
+
+  if (created) {
+    return (
+      <div className="form">
+        <div
+          className="card"
+          style={{
+            padding: 16,
+            background: "var(--surface-2, #f3ebe0)",
+            border: "1px solid var(--border, #e4d6c5)",
+          }}
+        >
+          <div className="row gap-2" style={{ marginBottom: 8, fontWeight: 600 }}>
+            <Check size={16} /> {created.name}
+          </div>
+          <div className="muted" style={{ fontSize: "0.82rem", marginBottom: 6 }}>
+            Account ID — share this to receive money
+          </div>
+          <code
+            className="mono"
+            style={{
+              display: "block",
+              wordBreak: "break-all",
+              fontSize: "0.85rem",
+              lineHeight: 1.45,
+            }}
+          >
+            {created.id}
+          </code>
+        </div>
+        <div className="row gap-3" style={{ justifyContent: "flex-end" }}>
+          <button
+            type="button"
+            className="btn"
+            onClick={() => {
+              navigator.clipboard
+                .writeText(created.id)
+                .then(() => toast.success("Account ID copied", { description: created.id }))
+                .catch(() => toast.error("Couldn't copy"));
+            }}
+          >
+            <Copy size={16} /> Copy ID
+          </button>
+          <Link href={`/accounts/${created.id}`} className="btn btn-primary" onClick={onClose}>
+            View account
+          </Link>
+        </div>
+      </div>
+    );
   }
 
   return (

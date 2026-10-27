@@ -88,11 +88,12 @@ export async function getBalance(userId: string, accountId: string) {
   });
 }
 
-/** Users may only withdraw (debit). Credits are admin-only. */
-export async function withdraw(
+/** Add a credit or debit to one of the caller's accounts. */
+export async function postTransaction(
   userId: string,
   accountId: string,
   input: {
+    type: "credit" | "debit";
     amount: string;
     description: string | null;
     reference_id: string;
@@ -105,7 +106,7 @@ export async function withdraw(
   }>("post_transaction", {
     p_user_id: userId,
     p_account_id: accountId,
-    p_type: "debit",
+    p_type: input.type,
     p_amount: input.amount,
     p_description: input.description,
     p_reference_id: input.reference_id,

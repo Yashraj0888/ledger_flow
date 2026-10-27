@@ -34,8 +34,8 @@ Working checklist for the Transaction Ledger API (with per-user login).
 - **Isolation:** every account belongs to one user; every ledger function takes the authenticated `user_id`
   and filters by ownership. Foreign account ids answer `404 ACCOUNT_NOT_FOUND` (indistinguishable from missing).
 - **Transfers:** source must be yours; destination may be yours or another user's account.
-  Foreign destination balances are not returned (`to_balance: null`). Users cannot self-credit —
-  only the env admin can add money (`CREDIT_FORBIDDEN` on user credit).
+  Foreign destination balances are not returned (`to_balance: null`). Users may credit/debit their own accounts;
+  optional env admin can also credit any account.
 - `account_id` lives in the URL path for account-scoped routes.
 - Duplicate `reference_id` (same account): `409 DUPLICATE_TRANSACTION`, existing tx in details; balance unchanged.
 - Insufficient balance: `422 INSUFFICIENT_BALANCE`.
@@ -132,11 +132,11 @@ docs/  (API.md, plan.md, assessment)
 - [x] Guarded pages: `/dashboard` (totals, account cards, new-account modal), `/accounts/[accountId]`
       (balance hero, withdraw + transfer, filterable + paginated history, copy id), `/transfer`
       (own accounts or peer by account ID, live preview, success card)
-- [x] Admin: env credentials, `/admin/login` + `/admin` credit console; users cannot self-credit;
+- [x] Admin (optional): env credentials, `/admin/login` + `/admin` credit console;
       peer transfers allowed; admin cannot withdraw/transfer
 - [x] Toasts for every outcome; server error codes are mapped to friendly messages (`lib/client/notify.ts`)
 - [x] Client checks are convenience only; every rule is re-enforced by the API and database
-- [x] Verified in the browser: register, password + MPIN login, account create, admin credit, withdraw,
+- [x] Verified in the browser: register, password + MPIN login, account create, credit, debit,
       peer transfer, logout, route guard, foreign-account screen, admin console, light theme
 
 ## Phase 4 — Testing
@@ -144,8 +144,7 @@ docs/  (API.md, plan.md, assessment)
 - [x] `scripts/e2e.mjs`: offline checks (auth gating, validation, 405, 404)
 - [x] DB-level suite (see Phase 1)
 - [x] `npm run test:e2e` full run (auth, cookie sessions, lockout + reset, admin login/credit,
-      user self-credit forbidden, walkthrough via admin credits, isolation, peer transfers,
-      parallel debits/admin credits, page gate) — 157/157 passing
+      user credit/debit walkthrough, isolation, peer transfers, parallel writes, page gate)
 
 ## Phase 5 — AWS hosting
 

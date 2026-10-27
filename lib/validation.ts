@@ -135,14 +135,6 @@ export const createAccountSchema = z.strictObject({
     .max(255, "name must be at most 255 characters"),
 });
 
-/** Users may only withdraw. Credits are rejected by the API and the database. */
-export const withdrawSchema = z.strictObject({
-  amount: amountField,
-  description: descriptionField,
-  reference_id: referenceIdField,
-});
-
-/** Kept for online validation of legacy credit attempts → CREDIT_FORBIDDEN. */
 export const createTransactionSchema = z.strictObject({
   type: typeField,
   amount: amountField,

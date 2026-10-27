@@ -108,7 +108,7 @@ export default function DashboardPage() {
             <Landmark size={32} />
           </div>
           <h3>Open your first account</h3>
-          <p>Create an account to start adding money, tracking activity and moving funds.</p>
+          <p>You&apos;ll get an account ID right away. Add money, track activity, and transfer funds.</p>
           <button className="btn btn-primary" style={{ marginTop: 8 }} onClick={() => setModal(true)}>
             <Plus size={18} /> Create account
           </button>
@@ -132,10 +132,10 @@ export default function DashboardPage() {
                 </div>
                 <div className="row between meta" style={{ marginTop: 6 }}>
                   <span>Opened {formatDate(account.created_at)}</span>
-                  <span className="row gap-2">
-                    <span className="mono">•••• {account.id.slice(-4)}</span>
-                    <ArrowRight size={14} />
-                  </span>
+                  <ArrowRight size={14} />
+                </div>
+                <div className="mono meta" style={{ marginTop: 4, opacity: 0.9, wordBreak: "break-all" }}>
+                  {account.id}
                 </div>
               </div>
             </Link>

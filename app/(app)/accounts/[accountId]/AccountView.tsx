@@ -17,12 +17,13 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { Money } from "@/components/Money";
-import { WithdrawModal } from "@/components/WithdrawModal";
+import { TransactionModal } from "@/components/TransactionModal";
 import { api, ApiError, type Account, type Pagination, type Transaction } from "@/lib/client/api";
 import { cardColorFor, formatDate, formatDateTime, formatMoney } from "@/lib/client/format";
 import { notifyError } from "@/lib/client/notify";
 
 type Filter = "all" | "credit" | "debit";
+type ModalType = "credit" | "debit" | null;
 
 export function AccountSkeleton() {
   return (
@@ -48,7 +49,7 @@ function AccountContent({ accountId }: { accountId: string }) {
   const [filter, setFilter] = useState<Filter>("all");
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(10);
-  const [withdrawOpen, setWithdrawOpen] = useState(false);
+  const [modal, setModal] = useState<ModalType>(null);
   const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
@@ -126,22 +127,28 @@ function AccountContent({ accountId }: { accountId: string }) {
                 .then(() => toast.success("Account ID copied", { description: account.id }))
                 .catch(() => toast.error("Couldn't copy", { description: "Copy it manually from the page." }));
             }}
-            title="Copy account ID"
+            title="Copy full account ID"
           >
-            <Copy size={15} /> <span className="mono">•••• {account.id.slice(-4)}</span>
+            <Copy size={15} /> Copy ID
           </button>
         </div>
-        <div style={{ fontSize: "0.85rem", opacity: 0.85, marginTop: 22 }}>Available balance</div>
+        <div style={{ fontSize: "0.78rem", opacity: 0.8, marginTop: 14 }} className="mono">
+          {account.id}
+        </div>
+        <div style={{ fontSize: "0.85rem", opacity: 0.85, marginTop: 18 }}>Available balance</div>
         <div className="big">
           <Money value={account.balance} />
         </div>
         <div className="row gap-3 wrap">
-          <Link href={`/transfer?from=${account.id}`} className="btn btn-cream">
-            <ArrowLeftRight size={18} /> Transfer
-          </Link>
-          <button className="btn btn-glass" onClick={() => setWithdrawOpen(true)}>
+          <button className="btn btn-cream" onClick={() => setModal("credit")}>
+            <ArrowDownLeft size={18} /> Add money
+          </button>
+          <button className="btn btn-glass" onClick={() => setModal("debit")}>
             <ArrowUpRight size={18} /> Withdraw
           </button>
+          <Link href={`/transfer?from=${account.id}`} className="btn btn-glass">
+            <ArrowLeftRight size={18} /> Transfer
+          </Link>
         </div>
       </section>
 
@@ -182,13 +189,13 @@ function AccountContent({ accountId }: { accountId: string }) {
             <h3>{filter === "all" ? "No activity yet" : "Nothing here"}</h3>
             <p>
               {filter === "all"
-                ? "Money arrives when an admin credits this account, or when someone transfers to you."
+                ? "Add money, withdraw, or transfer — activity will show up here."
                 : "No transactions match this filter."}
             </p>
             {filter === "all" && (
-              <Link href={`/transfer?from=${account.id}`} className="btn btn-primary" style={{ marginTop: 8 }}>
-                <ArrowLeftRight size={18} /> Transfer
-              </Link>
+              <button className="btn btn-primary" style={{ marginTop: 8 }} onClick={() => setModal("credit")}>
+                <ArrowDownLeft size={18} /> Add money
+              </button>
             )}
           </div>
         ) : (
@@ -270,18 +277,21 @@ function AccountContent({ accountId }: { accountId: string }) {
         )}
       </section>
 
-      <WithdrawModal
-        open={withdrawOpen}
-        onClose={() => setWithdrawOpen(false)}
-        accountId={account.id}
-        accountName={account.name}
-        balance={account.balance}
-        onDone={() => {
-          setFilter("all");
-          setPage(1);
-          setReloadKey((k) => k + 1);
-        }}
-      />
+      {modal && (
+        <TransactionModal
+          open
+          type={modal}
+          onClose={() => setModal(null)}
+          accountId={account.id}
+          accountName={account.name}
+          balance={account.balance}
+          onDone={() => {
+            setFilter("all");
+            setPage(1);
+            setReloadKey((k) => k + 1);
+          }}
+        />
+      )}
     </>
   );
 }
