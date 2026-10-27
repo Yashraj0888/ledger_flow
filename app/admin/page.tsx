@@ -74,6 +74,7 @@ export default function AdminPage() {
       return (
         a.name.toLowerCase().includes(q) ||
         a.owner_username.toLowerCase().includes(q) ||
+        a.owner_name.toLowerCase().includes(q) ||
         a.id.toLowerCase().includes(q)
       );
     }) ?? null;
@@ -112,7 +113,7 @@ export default function AdminPage() {
           <Search size={18} className="lead" />
           <input
             className="input has-lead"
-            placeholder="Search by username, account name or ID"
+            placeholder="Search by name, username, account or ID"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
@@ -145,7 +146,7 @@ export default function AdminPage() {
                   <div className="title">
                     {account.name}{" "}
                     <span className="muted" style={{ fontWeight: 500 }}>
-                      · @{account.owner_username}
+                      · {account.owner_name} (@{account.owner_username})
                     </span>
                   </div>
                   <div className="sub">
@@ -226,7 +227,7 @@ function CreditModal({
         },
       );
       toast.success(`${formatMoney(data.amount)} credited`, {
-        description: `${account.name} (@${account.owner_username}) → ${formatMoney(data.balance)}`,
+        description: `${account.name} · ${account.owner_name} → ${formatMoney(data.balance)}`,
       });
       onDone(data.balance);
     } catch (err) {
@@ -243,7 +244,7 @@ function CreditModal({
       open
       onClose={onClose}
       title="Add money"
-      description={`Credit “${account.name}” owned by @${account.owner_username}.`}
+      description={`Credit “${account.name}” owned by ${account.owner_name}.`}
     >
       <form className="form" onSubmit={onSubmit} noValidate>
         <div className="field">

@@ -96,7 +96,14 @@ const mpinField = z
 
 // ---------------------------------------------------------------- auth
 
+const displayNameField = z
+  .string({ error: "name is required and must be a string" })
+  .trim()
+  .min(1, "name must not be blank")
+  .max(80, "name must be at most 80 characters");
+
 export const registerSchema = z.strictObject({
+  name: displayNameField,
   username: usernameField,
   password: z
     .string({ error: "password is required and must be a string" })

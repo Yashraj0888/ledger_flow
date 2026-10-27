@@ -87,7 +87,7 @@ export function TransferView() {
     mode === "own"
       ? ownTo?.name ?? null
       : peer
-        ? `${peer.name} (@${peer.owner_username})`
+        ? `${peer.name} · ${peer.owner_name}`
         : null;
 
   const preview = useMemo(() => {
@@ -376,7 +376,7 @@ export function TransferView() {
               </div>
               {peer && (
                 <div className="badge accent" style={{ alignSelf: "flex-start", marginTop: 4 }}>
-                  <UserRound size={13} /> {peer.name} · @{peer.owner_username}
+                  <UserRound size={13} /> {peer.name} · {peer.owner_name}
                 </div>
               )}
               {errors.to ? (

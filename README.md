@@ -57,9 +57,9 @@ user's data.
 - UI: **Login as admin** on the sign-in page → `/admin` credit console
 
 **Web app**
-- **Sign in** (Password / MPIN tabs) and **Create profile** (password, a 4-6 digit MPIN with confirmation, strength meter, auto sign-in).
+- **Sign in** (Password / MPIN tabs) and **Create profile** (real name + username, password, a 4-6 digit MPIN with confirmation, strength meter, auto sign-in).
   Both the password and the MPIN are stored only as salted scrypt hashes (`password_hash`, `mpin_hash`)
-- **Dashboard:** total balance, account count, largest account, account cards, "New account" modal
+- **Dashboard:** greets you by **name** (not username), total balance, account count, largest account, account cards, "New account" modal
 - **Account page:** balance hero, **Add money / Withdraw / Transfer**, history with All / Money in / Money out tabs,
   page-size and pagination, copy account id (needed so others can send you money)
 - **Transfer page:** to your own account **or** someone else (paste their account ID + look up), live preview,

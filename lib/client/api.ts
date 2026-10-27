@@ -97,6 +97,8 @@ export async function api<T>(
 export interface User {
   id: string;
   username: string;
+  /** Display / real name shown in the UI. */
+  name: string;
 }
 
 export interface Account {
@@ -135,6 +137,7 @@ export interface AccountLookup {
   id: string;
   name: string;
   owner_username: string;
+  owner_name: string;
 }
 
 export interface AdminAccount {
@@ -144,6 +147,7 @@ export interface AdminAccount {
   created_at: string;
   owner_id: string;
   owner_username: string;
+  owner_name: string;
 }
 
 /** Fetch every account of the logged-in user (follows pagination). */

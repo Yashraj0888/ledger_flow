@@ -33,9 +33,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <div className="grow" />
           <div className="user-chip">
             <span className="avatar" aria-hidden>
-              {user?.username.slice(0, 1)}
+              {(user?.name || user?.username || "?").slice(0, 1).toUpperCase()}
             </span>
-            <span className="name">{user?.username}</span>
+            <span className="name">{user?.name}</span>
             <button
               type="button"
               className="btn btn-ghost btn-sm btn-icon"

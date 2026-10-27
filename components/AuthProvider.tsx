@@ -15,7 +15,7 @@ interface AuthContextValue {
   status: Status;
   user: User | null;
   login: (input: LoginInput) => Promise<User>;
-  register: (input: { username: string; password: string; mpin: string }) => Promise<void>;
+  register: (input: { name: string; username: string; password: string; mpin: string }) => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -72,7 +72,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return data.user;
   }, []);
 
-  const register = useCallback(async (input: { username: string; password: string; mpin: string }) => {
+  const register = useCallback(async (input: {
+    name: string;
+    username: string;
+    password: string;
+    mpin: string;
+  }) => {
     await api("/auth/register", { method: "POST", body: input, skipAuthRedirect: true });
   }, []);
 

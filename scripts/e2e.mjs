@@ -63,8 +63,10 @@ function check(name, condition, extra) {
 const expectError = (name, res, status, code) =>
   check(`${name} -> ${status} ${code}`, res.status === status && res.json?.error?.code === code, res.json ?? res.status);
 
-async function register(username, password = "correct-horse-1", mpin = "4821") {
-  return call("POST", "/api/v1/auth/register", { body: { username, password, mpin } });
+async function register(username, password = "correct-horse-1", mpin = "4821", name) {
+  return call("POST", "/api/v1/auth/register", {
+    body: { name: name ?? `User ${username}`, username, password, mpin },
+  });
 }
 async function loginPassword(username, password = "correct-horse-1") {
   return call("POST", "/api/v1/auth/login", { body: { method: "password", username, password } });
@@ -74,10 +76,11 @@ async function loginMpin(username, mpin = "4821") {
 }
 async function newUser(prefix) {
   const username = `${prefix}_${run}`;
-  const reg = await register(username);
+  const name = `${prefix[0].toUpperCase()}${prefix.slice(1)} ${run}`;
+  const reg = await register(username, undefined, undefined, name);
   if (reg.status !== 201) throw new Error(`register failed: ${JSON.stringify(reg.json)}`);
   const login = await loginPassword(username);
-  return { username, id: reg.json.data.id, token: login.json.data.token };
+  return { username, name, id: reg.json.data.id, token: login.json.data.token };
 }
 async function newAccount(token, name) {
   const res = await call("POST", "/api/v1/accounts", { token, body: { name } });
@@ -158,8 +161,9 @@ async function offlineSuite() {
 async function authSuite() {
   console.log("\n[auth] register / login (password + MPIN) / lockout / logout");
   const username = `auth_${run}`;
-  const reg = await register(username);
-  check("register -> 201", reg.status === 201 && reg.json?.data?.username === username, reg.json);
+  const displayName = `Auth Tester ${run}`;
+  const reg = await register(username, undefined, undefined, displayName);
+  check("register -> 201", reg.status === 201 && reg.json?.data?.username === username && reg.json?.data?.name === displayName, reg.json);
   check("register never returns secrets", !JSON.stringify(reg.json).match(/hash|password|mpin/i), reg.json);
   expectError("duplicate username", await register(username), 409, "USERNAME_TAKEN");
   expectError("duplicate username is case-insensitive", await register(username.toUpperCase()), 409, "USERNAME_TAKEN");
@@ -188,7 +192,11 @@ async function authSuite() {
   expectError("MPIN is not accepted as a password", await loginPassword(username, "4821"), 401, "INVALID_CREDENTIALS");
 
   const me = await call("GET", "/api/v1/auth/me", { token: byPassword.json.data.token });
-  check("me returns the logged-in user", me.status === 200 && me.json?.data?.username === username, me.json);
+  check(
+    "me returns the logged-in user",
+    me.status === 200 && me.json?.data?.username === username && me.json?.data?.name === displayName,
+    me.json,
+  );
   expectError("bogus token", await call("GET", "/api/v1/auth/me", { token: "lf_bogus" }), 401, "UNAUTHENTICATED");
 
   const out = await call("POST", "/api/v1/auth/logout", { token: byPassword.json.data.token });
@@ -353,7 +361,15 @@ async function isolationSuite() {
   );
   check("bob received the peer transfer", (await balance(bob.token, bAcc.id)) === "60.00");
   const lookup = await call("GET", `/api/v1/accounts/lookup/${bAcc.id}`, { token: alice.token });
-  check("lookup shows recipient without balance", lookup.status === 200 && lookup.json.data.owner_username === bob.username && lookup.json.data.name === "Bob private" && !("balance" in lookup.json.data), lookup.json);
+  check(
+    "lookup shows recipient without balance",
+    lookup.status === 200 &&
+      lookup.json.data.owner_username === bob.username &&
+      lookup.json.data.owner_name === bob.name &&
+      lookup.json.data.name === "Bob private" &&
+      !("balance" in lookup.json.data),
+    lookup.json,
+  );
 
   const unknown = await call("GET", "/api/v1/accounts/3fa85f64-5717-4562-b3fc-2c963f66afa6/balance", { token: bob.token });
   const foreign = await call("GET", `/api/v1/accounts/${aAcc.id}/balance`, { token: bob.token });

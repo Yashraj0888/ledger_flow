@@ -14,6 +14,7 @@ import {
 } from "@/lib/auth/session";
 
 export interface RegisterInput {
+  name: string;
   username: string;
   password: string;
   mpin: string;
@@ -27,7 +28,7 @@ export interface LoginResult {
   token: string;
   token_type: "Bearer";
   expires_at: string;
-  user: { id: string; username: string };
+  user: { id: string; username: string; name: string };
 }
 
 const invalidCredentials = () =>
@@ -57,11 +58,12 @@ export async function registerUser(input: RegisterInput) {
   const { data, error } = await getSupabase()
     .from("users")
     .insert({
+      name: input.name,
       username: input.username,
       password_hash: passwordHash,
       mpin_hash: mpinHash,
     })
-    .select("id, username, created_at")
+    .select("id, name, username, created_at")
     .single();
 
   if (error) {
@@ -76,6 +78,7 @@ export async function registerUser(input: RegisterInput) {
 
   return {
     id: data.id as string,
+    name: data.name as string,
     username: data.username as string,
     created_at: new Date(data.created_at as string).toISOString(),
   };
@@ -92,7 +95,7 @@ export async function login(input: LoginInput): Promise<LoginResult> {
 
   const { data: user, error } = await getSupabase()
     .from("users")
-    .select("id, username, password_hash, mpin_hash, locked_until")
+    .select("id, name, username, password_hash, mpin_hash, locked_until")
     .eq("username", input.username)
     .maybeSingle();
 
@@ -137,7 +140,11 @@ export async function login(input: LoginInput): Promise<LoginResult> {
     token,
     token_type: "Bearer",
     expires_at: new Date(expiresAt).toISOString(),
-    user: { id: user.id as string, username: user.username as string },
+    user: {
+      id: user.id as string,
+      username: user.username as string,
+      name: user.name as string,
+    },
   };
 }
 

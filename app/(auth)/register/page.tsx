@@ -3,13 +3,23 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { AlertCircle, Eye, EyeOff, Hash, Loader2, Lock, Rocket, User as UserIcon } from "lucide-react";
+import {
+  AlertCircle,
+  Eye,
+  EyeOff,
+  Hash,
+  Loader2,
+  Lock,
+  Rocket,
+  User as UserIcon,
+  UserRound,
+} from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/components/AuthProvider";
 import { ApiError } from "@/lib/client/api";
 import { notifyError } from "@/lib/client/notify";
 
-type Errors = Partial<Record<"username" | "password" | "mpin" | "confirm", string>>;
+type Errors = Partial<Record<"name" | "username" | "password" | "mpin" | "confirm", string>>;
 
 function strength(password: string): { level: number; label: string } {
   if (!password) return { level: 0, label: "" };
@@ -34,6 +44,7 @@ function FieldError({ message }: { message?: string }) {
 export default function RegisterPage() {
   const { register, login } = useAuth();
   const router = useRouter();
+  const [name, setName] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -50,6 +61,8 @@ export default function RegisterPage() {
 
   function validate(): boolean {
     const next: Errors = {};
+    if (!name.trim()) next.name = "Enter your name";
+    else if (name.trim().length > 80) next.name = "Keep it under 80 characters";
     if (!/^[A-Za-z0-9_]{3,32}$/.test(username.trim())) {
       next.username = "3 to 32 characters: letters, numbers or underscore";
     }
@@ -64,13 +77,19 @@ export default function RegisterPage() {
     event.preventDefault();
     if (busy || !validate()) return;
     setBusy(true);
-    const name = username.trim();
+    const displayName = name.trim();
+    const loginName = username.trim();
     try {
-      await register({ username: name, password, mpin });
+      await register({ name: displayName, username: loginName, password, mpin });
     } catch (error) {
       if (error instanceof ApiError) {
         const fields = error.fieldErrors;
-        setErrors({ username: fields.username, password: fields.password, mpin: fields.mpin });
+        setErrors({
+          name: fields.name,
+          username: fields.username,
+          password: fields.password,
+          mpin: fields.mpin,
+        });
       }
       notifyError(error, "Couldn't create your account");
       setBusy(false);
@@ -78,8 +97,8 @@ export default function RegisterPage() {
     }
 
     try {
-      const user = await login({ method: "password", username: name, password });
-      toast.success(`Welcome to LedgerFlow, ${user.username}!`, {
+      const user = await login({ method: "password", username: loginName, password });
+      toast.success(`Welcome to LedgerFlow, ${user.name}!`, {
         description: "Your profile is ready. Let's open your first account.",
       });
       router.replace("/dashboard");
@@ -95,11 +114,35 @@ export default function RegisterPage() {
       <div>
         <h1>Create your profile</h1>
         <p className="muted" style={{ marginTop: 8 }}>
-          Set a password and a 4 to 6 digit MPIN. Either one signs you in.
+          Your name is what we show in the app. Username is only for signing in.
         </p>
       </div>
 
       <form className="form" onSubmit={onSubmit} noValidate>
+        <div className="field">
+          <label className="label" htmlFor="name">
+            Your name
+          </label>
+          <div className="input-wrap">
+            <UserRound className="lead" size={18} />
+            <input
+              id="name"
+              className="input has-lead"
+              autoComplete="name"
+              placeholder="e.g. Alice Khan"
+              maxLength={80}
+              value={name}
+              aria-invalid={!!errors.name}
+              onChange={(e) => {
+                setName(e.target.value);
+                clear("name");
+              }}
+              autoFocus
+            />
+          </div>
+          <FieldError message={errors.name} />
+        </div>
+
         <div className="field">
           <label className="label" htmlFor="username">
             Username
@@ -120,9 +163,9 @@ export default function RegisterPage() {
                 setUsername(e.target.value);
                 clear("username");
               }}
-              autoFocus
             />
           </div>
+          <span className="hint">Used to sign in — letters, numbers or underscore.</span>
           <FieldError message={errors.username} />
         </div>
 

@@ -149,6 +149,7 @@ Creates a user. Both a password and an MPIN are set so either can be used to log
 
 ```json
 {
+  "name": "Alice Khan",
   "username": "alice",
   "password": "correct-horse-1",
   "mpin": "4821"
@@ -157,7 +158,8 @@ Creates a user. Both a password and an MPIN are set so either can be used to log
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
-| `username` | string | yes | 3–32 chars: letters, digits, `_`. Stored lowercase; unique case-insensitively |
+| `name` | string | yes | Display / real name (1–80 chars). Shown in the UI |
+| `username` | string | yes | 3–32 chars: letters, digits, `_`. Stored lowercase; unique case-insensitively. Used to sign in |
 | `password` | string | yes | 8–128 chars |
 | `mpin` | string | yes | 4–6 digits (string, so leading zeros are kept) |
 
@@ -167,6 +169,7 @@ Creates a user. Both a password and an MPIN are set so either can be used to log
 {
   "data": {
     "id": "0f4c1c8e-6d52-4a53-8a0c-1b2b0c6c5d11",
+    "name": "Alice Khan",
     "username": "alice",
     "created_at": "2026-10-27T14:00:00.000Z"
   }
@@ -191,7 +194,7 @@ Creates a user. Both a password and an MPIN are set so either can be used to log
 ```bash
 curl -s -X POST http://localhost:3000/api/v1/auth/register \
   -H "Content-Type: application/json" \
-  -d '{"username":"alice","password":"correct-horse-1","mpin":"4821"}'
+  -d '{"name":"Alice Khan","username":"alice","password":"correct-horse-1","mpin":"4821"}'
 ```
 
 ---
@@ -233,7 +236,7 @@ Sending the other method's credential field (e.g. `mpin` with `method=password`)
     "token": "lf_Qm9v...",
     "token_type": "Bearer",
     "expires_at": "2026-10-27T22:00:00.000Z",
-    "user": { "id": "0f4c1c8e-6d52-4a53-8a0c-1b2b0c6c5d11", "username": "alice" }
+    "user": { "id": "0f4c1c8e-6d52-4a53-8a0c-1b2b0c6c5d11", "username": "alice", "name": "Alice Khan" }
   }
 }
 ```
@@ -284,7 +287,7 @@ curl -s -X POST http://localhost:3000/api/v1/auth/login \
 `GET /api/v1/auth/me` — requires login
 
 ```json
-{ "data": { "id": "0f4c1c8e-6d52-4a53-8a0c-1b2b0c6c5d11", "username": "alice" } }
+{ "data": { "id": "0f4c1c8e-6d52-4a53-8a0c-1b2b0c6c5d11", "username": "alice", "name": "Alice Khan" } }
 ```
 
 | Status | Code | Case |
@@ -448,7 +451,8 @@ Never returns balance.
   "data": {
     "id": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
     "name": "Savings",
-    "owner_username": "alice"
+    "owner_username": "alice",
+    "owner_name": "Alice Khan"
   }
 }
 ```
@@ -913,7 +917,8 @@ curl -s -X POST http://localhost:3000/api/v1/admin/accounts/{accountId}/credit \
 | Field | Type | Notes |
 |---|---|---|
 | `id` | UUID | PK |
-| `username` | string | Unique, lowercase |
+| `name` | string | Display / real name (shown in UI) |
+| `username` | string | Unique, lowercase (login handle) |
 | `created_at` | ISO-8601 | System-generated |
 
 Password hash, MPIN hash and lockout counters are internal and never exposed.

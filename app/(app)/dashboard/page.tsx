@@ -42,7 +42,7 @@ export default function DashboardPage() {
       <div className="page-head">
         <div>
           <h1>
-            {greeting()}, <span className="accent-text">{user?.username}</span>
+            {greeting()}, <span className="accent-text">{user?.name}</span>
           </h1>
           <p>Here&apos;s everything across your accounts.</p>
         </div>

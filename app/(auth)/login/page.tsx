@@ -47,7 +47,7 @@ export default function LoginPage() {
           ? { method, username: username.trim(), password: secret }
           : { method, username: username.trim(), mpin: secret },
       );
-      toast.success(`Welcome back, ${user.username}`, {
+      toast.success(`Welcome back, ${user.name}`, {
         description: method === "mpin" ? "Signed in with your MPIN." : "Signed in with your password.",
       });
       router.replace("/dashboard");

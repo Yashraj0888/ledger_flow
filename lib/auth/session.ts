@@ -8,6 +8,7 @@ export interface AuthContext {
   sessionId: string;
   userId: string;
   username: string;
+  name: string;
 }
 
 export function generateToken(): string {
@@ -79,6 +80,7 @@ export async function lookupSession(token: string): Promise<AuthContext | null> 
     session_id: string;
     user_id: string;
     username: string;
+    name: string;
   } | null>("authenticate_session", { p_token_hash: hashToken(token) });
 
   if (!session) return null;
@@ -86,5 +88,6 @@ export async function lookupSession(token: string): Promise<AuthContext | null> 
     sessionId: session.session_id,
     userId: session.user_id,
     username: session.username,
+    name: session.name,
   };
 }

@@ -117,7 +117,12 @@ export async function postTransaction(
 }
 
 export async function lookupAccount(accountId: string) {
-  return rpc<{ id: string; name: string; owner_username: string }>("lookup_account", {
+  return rpc<{
+    id: string;
+    name: string;
+    owner_username: string;
+    owner_name: string;
+  }>("lookup_account", {
     p_account_id: accountId,
   });
 }
@@ -194,6 +199,7 @@ export interface AdminAccount {
   created_at: string;
   owner_id: string;
   owner_username: string;
+  owner_name: string;
 }
 
 const toAdminAccount = (row: AdminAccount): AdminAccount => ({
