@@ -1,60 +1,57 @@
 # LedgerFlow — API Documentation
 
-Transaction Ledger API (assessment contract) with per-user authentication.
+This file lists every API call: what to send, what you get back, and what can go wrong.
+
+**In one sentence:** you sign in, open money accounts, add or remove money, check history, and can send money to another account.
 
 | | |
 |---|---|
-| Runtime | **Next.js (latest)** App Router Route Handlers |
-| Database | **Supabase** (Postgres) |
-| Hosting | **AWS** |
-| Base URL | `/api/v1` |
-| Auth | `Authorization: Bearer <token>` **or** the `lf_session` HttpOnly cookie (both issued by [Login](#2-login)) |
-| Build plan | [plan.md](plan.md) |
+| App / API | Next.js · base path `/api/v1` |
+| Database | Supabase (Postgres) |
+| How to prove you are you | After [Login](#2-login): send `Authorization: Bearer <token>` **or** use the `lf_session` cookie |
+| Related docs | [README](../README.md) · [plan.md](plan.md) · [assignment](full_stack_developer_assessment.md) |
 
-Tick each checkbox when that endpoint (or behavior) is implemented **and verified**
-(`npm run test:e2e` covers every behavior listed here).
-Keep in sync with [plan.md](plan.md). **This file is documentation only — no implementation lives here.**
+All behaviours below are implemented and checked by `npm run test:e2e`. This file is docs only — no code lives here.
 
 ---
 
-## Conventions
+## Simple rules (read this first)
 
-| Topic | Rule |
-|---|---|
-| Content-Type | `application/json` |
-| IDs | UUID v4 |
-| Money | Decimal strings with 2 places (e.g. `"100.00"`). Never floats in responses |
-| Timestamps | ISO-8601 UTC with milliseconds (`created_at`) |
-| Pagination | `page` (default `1`), `limit` (default `20`, max `100`) |
-| Sorting (history) | Latest first: `created_at DESC`, then `id DESC` |
-| Authentication | Every endpoint except `register`, `login`, `admin/login` and `/health` requires a session |
-| Route handlers | `app/api/v1/.../route.ts` (Next.js) |
+1. **Talk JSON.** Send `Content-Type: application/json`. Bodies and answers are JSON.
+2. **Sign in first.** Almost every call needs a session. Exceptions: register, login, admin login, `/health`.
+3. **Your money only.** You only see and change **your** accounts. Someone else’s account id looks like “not found” (`404`).
+4. **Money is text with 2 decimals.** Example: `"100.00"`. We do not return floating-point numbers.
+5. **Ids are UUIDs.** Long ids like `3fa85f64-5717-4562-b3fc-2c963f66afa6`.
+6. **Lists can be paged.** Use `page` (starts at 1) and `limit` (default 20, max 100). History is newest first.
 
-### Authentication & data isolation
+### Signing in (auth) — this is what makes it multi-user
 
-- Two login options: **username + password** or **username + MPIN** (a 4–6 digit PIN set at registration).
-- A successful login returns an opaque session `token` (valid 8 hours, revocable via logout).
-  Send it as `Authorization: Bearer <token>` on every protected request.
-- Login also sets the same token as an **`lf_session` cookie** (`HttpOnly`, `SameSite=Strict`, `Path=/`,
-  `Secure` in production, 8 h). The web app uses only the cookie, so the token is never readable by
-  JavaScript. If both are sent, the `Authorization` header wins. Logout revokes the session and clears the cookie.
-- **A user can only see and operate on their own accounts** (except peer transfers: destination may be
-  anyone's). Reading another user's account/balance/history is `404 ACCOUNT_NOT_FOUND`.
-- Users may **credit or debit** their own accounts via `POST …/transactions`.
-- **Admin** (optional): env credentials + `lf_admin` cookie; can list every account and credit any of them.
-  Cannot withdraw or transfer. Admin tokens are rejected by user APIs (and vice versa).
-- Passwords and MPINs are never stored in plain text (scrypt + server-side pepper) and are never returned.
-- 5 consecutive failed logins (password or MPIN) lock the user for 15 minutes (`429 TOO_MANY_ATTEMPTS`).
+Without login, anyone could touch any account. Auth ties every request to one person.
 
-### Success shapes
+- Register once. Then log in with **username + password** or **username + MPIN** (a 4–6 digit PIN).
+- Login gives you a **token** (good for 8 hours). Put it on later calls:  
+`Authorization: Bearer <token>`
+- The website also gets an **HttpOnly cookie** (`lf_session`) with the same token. The browser uses the cookie; Postman/curl usually use the header. If both are sent, the header wins.
+- Logout kills that session and clears the cookie.
+- Wrong password and “user does not exist” look the same (`401`) so people cannot guess usernames easily.
+- Five failed logins in a row → locked for 15 minutes (`429`).
+- Passwords and MPINs are stored hashed, never as plain text.
 
-Single resource:
+**What you can do with money**
+
+- On **your** accounts: credit (add), debit (withdraw), see balance and history.
+- **Transfer** from your account to another of yours, or to someone else’s account. You do not see their balance.
+- **Admin** (optional, separate login): can list all accounts and **add** money only — cannot withdraw or transfer.
+
+### When a call works
+
+One thing:
 
 ```json
 { "data": { } }
 ```
 
-List with pagination:
+A list (with page info):
 
 ```json
 {
@@ -68,13 +65,15 @@ List with pagination:
 }
 ```
 
-### Error shape (all errors)
+### When a call fails
+
+Always the same shape:
 
 ```json
 {
   "error": {
     "code": "ERROR_CODE",
-    "message": "Human-readable summary",
+    "message": "Short human explanation",
     "details": [
       { "field": "amount", "message": "Amount must be greater than 0" }
     ]
@@ -82,7 +81,7 @@ List with pagination:
 }
 ```
 
-`details` may be an array of field errors, an object (e.g. duplicate payload), or omitted.
+`details` is optional. It might be a list of field problems, an object (e.g. the duplicate transaction), or missing.
 
 ---
 
@@ -109,31 +108,34 @@ List with pagination:
 
 ---
 
-## Endpoints Checklist
+## API Endpoints 
 
 Authentication
-- [x] [Register](#1-register) — `POST /auth/register`
-- [x] [Login](#2-login) — `POST /auth/login` (username + password **or** username + MPIN)
-- [x] [Current user](#3-current-user) — `GET /auth/me`
-- [x] [Logout](#4-logout) — `POST /auth/logout`
+
+- [Register](#1-register) — `POST /auth/register`
+- [Login](#2-login) — `POST /auth/login` (username + password **or** username + MPIN)
+- [Current user](#3-current-user) — `GET /auth/me`
+- [Logout](#4-logout) — `POST /auth/logout`
 
 Ledger (require user login; scoped to the logged-in user unless noted)
-- [x] [Create Account](#5-create-account) — `POST /accounts`
-- [x] [List My Accounts](#6-list-my-accounts) — `GET /accounts`
-- [x] [Get One Account](#6a-get-one-account) — `GET /accounts/:accountId`
-- [x] [Lookup Account](#6b-lookup-account) — `GET /accounts/lookup/:accountId` (peer transfer helper)
-- [x] [Add Transaction](#7-add-transaction) — `POST /accounts/:accountId/transactions` (credit or debit)
-- [x] [Get Account Balance](#8-get-account-balance) — `GET /accounts/:accountId/balance`
-- [x] [Get Transaction History](#9-get-transaction-history) — `GET /accounts/:accountId/transactions`
-- [x] [Immutability](#10-transaction-immutability) — reject PUT/PATCH/DELETE on transactions
-- [x] [Health](#11-health) — `GET /health`
-- [x] [Money Transfer](#12-money-transfer-bonus) — `POST /transfers` (own or peer destination)
+
+- [Create Account](#5-create-account) — `POST /accounts`
+- [List My Accounts](#6-list-my-accounts) — `GET /accounts`
+- [Get One Account](#6a-get-one-account) — `GET /accounts/:accountId`
+- [Lookup Account](#6b-lookup-account) — `GET /accounts/lookup/:accountId` (peer transfer helper)
+- [Add Transaction](#7-add-transaction) — `POST /accounts/:accountId/transactions` (credit or debit)
+- [Get Account Balance](#8-get-account-balance) — `GET /accounts/:accountId/balance`
+- [Get Transaction History](#9-get-transaction-history) — `GET /accounts/:accountId/transactions`
+- [Immutability](#10-transaction-immutability) — reject PUT/PATCH/DELETE on transactions
+- [Health](#11-health) — `GET /health`
+- [Money Transfer](#12-money-transfer-bonus) — `POST /transfers` (own or peer destination)
 
 Admin (env credentials; `lf_admin` cookie; credit only)
-- [x] [Admin login](#13-admin) — `POST /admin/login`
-- [x] [Admin me / logout](#13-admin) — `GET /admin/me`, `POST /admin/logout`
-- [x] [List all accounts](#13-admin) — `GET /admin/accounts`
-- [x] [Credit account](#13-admin) — `POST /admin/accounts/:accountId/credit`
+
+- [Admin login](#13-admin) — `POST /admin/login`
+- [Admin me / logout](#13-admin) — `GET /admin/me`, `POST /admin/logout`
+- [List all accounts](#13-admin) — `GET /admin/accounts`
+- [Credit account](#13-admin) — `POST /admin/accounts/:accountId/credit`
 
 ---
 
@@ -149,8 +151,8 @@ Creates a user. Both a password and an MPIN are set so either can be used to log
 
 ```json
 {
-  "name": "Alice Khan",
-  "username": "alice",
+  "name": "Yashraj Singh",
+  "username": "yashraj",
   "password": "correct-horse-1",
   "mpin": "4821"
 }
@@ -169,8 +171,8 @@ Creates a user. Both a password and an MPIN are set so either can be used to log
 {
   "data": {
     "id": "0f4c1c8e-6d52-4a53-8a0c-1b2b0c6c5d11",
-    "name": "Alice Khan",
-    "username": "alice",
+    "name": "Yashraj Singh",
+    "username": "yashraj",
     "created_at": "2026-10-27T14:00:00.000Z"
   }
 }
@@ -194,7 +196,7 @@ Creates a user. Both a password and an MPIN are set so either can be used to log
 ```bash
 curl -s -X POST http://localhost:3000/api/v1/auth/register \
   -H "Content-Type: application/json" \
-  -d '{"name":"Alice Khan","username":"alice","password":"correct-horse-1","mpin":"4821"}'
+  -d '{"name":"Yashraj Singh","username":"yashraj","password":"correct-horse-1","mpin":"4821"}'
 ```
 
 ---
@@ -210,13 +212,13 @@ Two options, selected by `method`.
 ### Option 1 — username + password
 
 ```json
-{ "method": "password", "username": "alice", "password": "correct-horse-1" }
+{ "method": "password", "username": "yashraj", "password": "correct-horse-1" }
 ```
 
 ### Option 2 — username + MPIN
 
 ```json
-{ "method": "mpin", "username": "alice", "mpin": "4821" }
+{ "method": "mpin", "username": "yashraj", "mpin": "4821" }
 ```
 
 | Field | Type | Required | Notes |
@@ -236,7 +238,7 @@ Sending the other method's credential field (e.g. `mpin` with `method=password`)
     "token": "lf_Qm9v...",
     "token_type": "Bearer",
     "expires_at": "2026-10-27T22:00:00.000Z",
-    "user": { "id": "0f4c1c8e-6d52-4a53-8a0c-1b2b0c6c5d11", "username": "alice", "name": "Alice Khan" }
+    "user": { "id": "0f4c1c8e-6d52-4a53-8a0c-1b2b0c6c5d11", "username": "yashraj", "name": "Yashraj Singh" }
   }
 }
 ```
@@ -270,12 +272,12 @@ The response also carries `Set-Cookie: lf_session=<token>; Path=/; Max-Age=28800
 # password
 curl -s -X POST http://localhost:3000/api/v1/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"method":"password","username":"alice","password":"correct-horse-1"}'
+  -d '{"method":"password","username":"yashraj","password":"correct-horse-1"}'
 
 # MPIN
 curl -s -X POST http://localhost:3000/api/v1/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"method":"mpin","username":"alice","mpin":"4821"}'
+  -d '{"method":"mpin","username":"yashraj","mpin":"4821"}'
 ```
 
 ---
@@ -287,7 +289,7 @@ curl -s -X POST http://localhost:3000/api/v1/auth/login \
 `GET /api/v1/auth/me` — requires login
 
 ```json
-{ "data": { "id": "0f4c1c8e-6d52-4a53-8a0c-1b2b0c6c5d11", "username": "alice", "name": "Alice Khan" } }
+{ "data": { "id": "0f4c1c8e-6d52-4a53-8a0c-1b2b0c6c5d11", "username": "yashraj", "name": "Yashraj Singh" } }
 ```
 
 | Status | Code | Case |
@@ -322,20 +324,20 @@ The response also clears the `lf_session` cookie (`Max-Age=0`).
 
 `POST /api/v1/accounts` — requires login
 
-Creates a new account **owned by the logged-in user**. Initial balance is always `0`.
-Client must not set balance.
+Opens a new **money account** (wallet/pocket) for the logged-in user.  
+Initial balance is always `0`. Client must not set balance.
 
 ### Request
 
 ```json
 {
-  "name": "Alice"
+  "name": "Savings"
 }
 ```
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
-| `name` | string | yes | Non-empty after trim. Max 255 |
+| `name` | string | yes | Account label (not username / not person’s name). Non-empty after trim. Max 255 |
 
 ### Success — `201 Created`
 
@@ -343,7 +345,7 @@ Client must not set balance.
 {
   "data": {
     "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-    "name": "Alice",
+    "name": "Savings",
     "balance": "0.00",
     "created_at": "2026-10-27T14:22:01.123Z"
   }
@@ -362,7 +364,7 @@ Client must not set balance.
 ### Behaviors
 
 - [x] `id` unique and system-generated
-- [x] `name` required
+- [x] `name` required (account label)
 - [x] Initial balance always `"0.00"`
 - [x] `created_at` system-generated
 - [x] Client cannot set initial balance
@@ -374,7 +376,7 @@ Client must not set balance.
 curl -s -X POST http://localhost:3000/api/v1/accounts \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"name":"Alice"}'
+  -d '{"name":"Savings"}'
 ```
 
 ---
@@ -390,7 +392,7 @@ Returns **only the logged-in user's** accounts, newest first. This is how a user
 ```json
 {
   "data": [
-    { "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6", "name": "Alice", "balance": "100.00", "created_at": "2026-10-27T14:22:01.123Z" }
+    { "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6", "name": "yashraj", "balance": "100.00", "created_at": "2026-10-27T14:22:01.123Z" }
   ],
   "pagination": { "current_page": 1, "page_size": 20, "total_records": 1, "total_pages": 1 }
 }
@@ -419,7 +421,7 @@ Returns a single account owned by the logged-in user (used by the web app for th
 ### Success — `200 OK`
 
 ```json
-{ "data": { "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6", "name": "Alice", "balance": "100.00", "created_at": "2026-10-27T14:22:01.123Z" } }
+{ "data": { "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6", "name": "yashraj", "balance": "100.00", "created_at": "2026-10-27T14:22:01.123Z" } }
 ```
 
 | Status | Code | Case |
@@ -451,8 +453,8 @@ Never returns balance.
   "data": {
     "id": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
     "name": "Savings",
-    "owner_username": "alice",
-    "owner_name": "Alice Khan"
+    "owner_username": "yashraj",
+    "owner_name": "Yashraj Singh"
   }
 }
 ```
@@ -851,7 +853,7 @@ curl -s -X POST http://localhost:3000/api/v1/transfers \
 **Status:** - [x] Done
 
 Credentials live only in env (`ADMIN_USERNAME`, `ADMIN_PASSWORD`) — not a `users` row.
-Successful login returns a token and sets the **`lf_admin`** HttpOnly cookie. Admin can **only credit**.
+Successful login returns a token and sets the `lf_admin` HttpOnly cookie. Admin can **only credit**.
 
 | Method | Path | Notes |
 |---|---|---|

@@ -1,231 +1,229 @@
 # LedgerFlow
 
-A transaction ledger (REST API **and** web app) built with **Next.js 16 (App Router)**, **TypeScript** and
-**Supabase (Postgres)**. Users log in (username + password **or** MPIN), create accounts, post credits/debits,
-read balances and history, and move money between their own accounts. A user can never see or touch another
-user's data.
+Submission for the **Transaction Ledger API** assessment.
 
-- API contract: [docs/API.md](docs/API.md)
-- Build plan / status: [docs/plan.md](docs/plan.md)
-- Assignment: [docs/full_stack_developer_assessment.md](docs/full_stack_developer_assessment.md)
+Stack: **Next.js** (App Router) · **TypeScript** · **Supabase / Postgres**.
 
 ---
 
-## Features
+## Submission pack (assessment §11)
 
-> Keep this list updated whenever a feature is added or changed.
-
-**Authentication**
-- Register with username, password and a 4–6 digit MPIN
-- **Login option 1:** username + password
-- **Login option 2:** username + MPIN
-- Opaque session tokens (8 h), revocable via logout; only a SHA-256 of the token is stored
-- Browser sessions use an `HttpOnly` + `SameSite=Strict` (`Secure` in production) cookie, so the token is never
-  readable by JavaScript; API clients can still send `Authorization: Bearer <token>`
-- Passwords/MPINs hashed with scrypt + a server-side pepper; never stored or returned in plain text
-- Brute-force protection: 5 consecutive failed logins lock the user for 15 minutes
-- No user enumeration: unknown user and wrong secret produce the same response
-
-**Accounts & isolation**
-- Create an account (balance always starts at `0.00`; the client can't set it)
-- List only your own accounts, or fetch one (`GET /accounts/:id`)
-- Every account/balance/history/transaction/transfer call is scoped to the logged-in user;
-  another user's account id answers `404 ACCOUNT_NOT_FOUND`, identical to a non-existent id
-
-**Transactions**
-- Credit and debit with exact decimal money (`NUMERIC(18,2)`, strings in responses)
-- Debit rejected when the balance is insufficient (balance unchanged)
-- Idempotent `reference_id` per account → `409` with the existing transaction; same reference allowed on other accounts
-- Insert + balance update are one atomic database operation; concurrent writers are serialised with row locks
-- Transactions are immutable (API `405` + database triggers)
-- Optional admin can also credit any account (separate login)
-
-**History & balance**
-- Balance endpoint
-- History with `type` filter, `page`/`limit` pagination metadata, latest-first ordering
-
-**Transfers**
-- Atomic debit + credit from one of your accounts to **any** other account (your own or another user's)
-- Destination balance is hidden when sending to someone else
-- Lookup endpoint confirms recipient name + username (never the balance)
-- Rollback on any failure, deadlock-free locking
-
-**Admin**
-- Credentials live only in env (`ADMIN_USERNAME`, `ADMIN_PASSWORD`) — not a row in `users`
-- Separate HttpOnly cookie (`lf_admin`); can list every account and **credit** any of them
-- Cannot withdraw or transfer; admin token is rejected by user APIs
-- UI: **Login as admin** on the sign-in page → `/admin` credit console
-
-**Web app**
-- **Sign in** (Password / MPIN tabs) and **Create profile** (real name + username, password, a 4-6 digit MPIN with confirmation, strength meter, auto sign-in).
-  Both the password and the MPIN are stored only as salted scrypt hashes (`password_hash`, `mpin_hash`)
-- **Dashboard:** greets you by **name** (not username), total balance, account count, largest account, account cards, "New account" modal
-- **Account page:** balance hero, **Add money / Withdraw / Transfer**, history with All / Money in / Money out tabs,
-  page-size and pagination, copy account id (needed so others can send you money)
-- **Transfer page:** to your own account **or** someone else (paste their account ID + look up), live preview,
-  success summary
-- **Admin console** (`/admin`): search every account and credit money; no withdraw/transfer
-- Toast notifications for every outcome (signed in/out, account created, money added/withdrawn, transfer done,
-  admin credit, duplicate reference, insufficient balance, session expired) with friendly messages per error code
-- **Page gate (`proxy.ts`):** anyone without a valid session is always redirected to `/login` (including `/`),
-  and signed-in users opening `/login` or `/register` go to the dashboard. The session is verified against the
-  database, so forged, expired or revoked cookies are rejected and cleared. API routes are not redirected; they answer
-  `401` JSON
-- An expired session while using the app shows a toast and redirects to `/login`
-- Foreign or unknown account ids show a neutral "Account not found" screen
-- Warm, calm light design: cream paper background, espresso text and buttons, terracotta accents, olive for money in,
-  brick for money out; Fraunces (headings and amounts) with DM Sans (text); no gradients, no dark mode
-- Thin scrollbars that stay hidden until you scroll
-- Responsive down to phone width, accessible labels/focus states, `₹` with Indian digit grouping
-  (change `CURRENCY_SYMBOL` in `lib/client/format.ts`)
-- The UI only pre-checks input for convenience; every rule is enforced again by the API and the database
-
-**Platform**
-- Consistent error envelope and error-code catalog
-- `GET /health` with database connectivity check
-- Row Level Security on every table; only the server role can reach the database
-- End-to-end test suite (`npm run test:e2e`)
+| Item | Where |
+|---|---|
+| 1. Source code | This repository |
+| 2. README | This file |
+| 3. API documentation | [docs/API.md](docs/API.md) |
+| 4. Assumptions | [Assumptions](#assumptions) below (also summarised in [docs/plan.md](docs/plan.md)) |
 
 ---
 
-## Run locally
+## What this is
 
-Requirements: Node.js 20+ and a Supabase project.
+A ledger where a signed-in user can:
+
+1. Open accounts (balance always starts at `0`)
+2. Credit or debit an account
+3. Read balance and paginated history
+4. Transfer money between accounts (bonus — including to another user)
+
+Money rules (no overdraft, duplicate references, immutability, atomic updates) are enforced in **Postgres**, not only in TypeScript.
+
+On top of the brief we added **auth** (what makes this multi-user), per-user isolation, and a small web UI so you can exercise the API without living in Postman. Details: [What we added beyond the brief](#what-we-added-beyond-the-brief).
+
+---
+
+## How to run
+
+Needs Node 20+ and a Supabase project.
 
 ```bash
 npm install
-cp .env.example .env.local      # then fill in the three values (see below)
-npm run dev                      # http://localhost:3000  (web app) and /api/v1 (REST API)
+cp .env.example .env.local
+# Fill SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, AUTH_PEPPER
+# Optional: ADMIN_USERNAME, ADMIN_PASSWORD (admin credit console)
+# Apply SQL from supabase/migrations/ to the project
+npm run dev
 ```
 
-Open http://localhost:3000. You are sent to the sign-in page; choose **Create an account**, set a password and an
-MPIN, and you land on the dashboard.
+App: http://localhost:3000 · API base: http://localhost:3000/api/v1
 
-### Environment variables (`.env.local`, never committed)
-
-| Variable | Purpose |
+| Env var | Role |
 |---|---|
-| `SUPABASE_URL` | Project URL, e.g. `https://<ref>.supabase.co` |
-| `SUPABASE_SERVICE_ROLE_KEY` | **Server-only** service-role/secret key (Supabase → Project Settings → API Keys). Never expose it to the browser |
-| `AUTH_PEPPER` | Random secret ≥ 32 chars mixed into password/MPIN hashes. Generate: `node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"`. Changing it invalidates all stored passwords/MPINs |
-| `ADMIN_USERNAME` | Sole admin username (not stored in the database) |
-| `ADMIN_PASSWORD` | Sole admin password (≥ 8 chars). Only used to credit accounts |
-
-### Database
-
-The schema lives in [`supabase/migrations/`](supabase/migrations/). Apply it to an empty Supabase project with
-the Supabase SQL editor, `supabase db push`, or the Supabase MCP `apply_migration`.
-(The `ledgerflow` project used during development already has it applied.)
-
-### Quick tour
-
-```bash
-# 1. register, then log in with a password ...
-curl -s -X POST localhost:3000/api/v1/auth/register -H "Content-Type: application/json" \
-  -d '{"username":"alice","password":"correct-horse-1","mpin":"4821"}'
-
-curl -s -X POST localhost:3000/api/v1/auth/login -H "Content-Type: application/json" \
-  -d '{"method":"password","username":"alice","password":"correct-horse-1"}'
-# ... or with the MPIN
-curl -s -X POST localhost:3000/api/v1/auth/login -H "Content-Type: application/json" \
-  -d '{"method":"mpin","username":"alice","mpin":"4821"}'
-
-# 2. use the returned token
-export TOKEN=lf_...
-curl -s -X POST localhost:3000/api/v1/accounts -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" -d '{"name":"Alice"}'
-```
-
-More examples per endpoint: [docs/API.md](docs/API.md).
-
-### Tests
-
-```bash
-npm run dev                         # in one terminal
-npm run test:e2e                    # full suite against the real database
-npm run test:e2e -- --offline       # only checks that need no database
-BASE_URL=https://your-host npm run test:e2e
-npm run lint && npm run build
-```
-
-The suite covers both login options, cookie sessions, lockout and its reset, admin login/credit,
-the spec's balance walkthrough (+100 +50 −30 −20 = 100), rejected debits, duplicates,
-pagination/filter/order, **cross-user isolation** (no foreign reads/credits/debits; peer transfers allowed),
-parallel debits, parallel credits, own-account and peer transfers.
-Ledger rows are immutable, so test data is not deleted; each run uses fresh random usernames.
+| `SUPABASE_URL` | Project URL |
+| `SUPABASE_SERVICE_ROLE_KEY` | Server-only DB access (never expose to the browser) |
+| `AUTH_PEPPER` | Secret mixed into password/MPIN hashes (≥ 32 chars) |
+| `ADMIN_USERNAME` / `ADMIN_PASSWORD` | Optional admin login (credit-only) |
 
 ---
 
-## Architecture
+## How to verify (three paths)
 
-```
-Browser ──page request──▶ proxy.ts (valid session? else → /login)
-Browser UI (app/(auth), app/(app), components/, lib/client/*)  ── same-origin fetch, HttpOnly cookie
-Client ──HTTP──▶ Next.js Route Handlers (app/api/v1/**)
-                   │  requireAuth (Bearer or cookie → user)   ── lib/auth
-                   │  Zod validation / error mapping ── lib/validation, lib/http
-                   ▼
-                 lib/services/{auth,ledger}.ts
-                   ▼   service-role Supabase client (server only)
-                 Postgres functions (RPC) ── ownership filter, row locks, one transaction per call
-                   ▼
-                 Tables + constraints + triggers
+### 1. Automated suite (recommended)
+
+```bash
+npm run dev                 # terminal 1
+npm run test:e2e            # terminal 2 — hits the real DB
+npm run test:e2e -- --offline
 ```
 
-Business rules that matter for money live in the database (constraints, triggers, functions), not only in
-application code, so they hold no matter which code path writes.
+Covers: register/login (password + MPIN), lockout, cookie sessions, create account at `0`, credit/debit walkthrough (`+100 +50 −30 −20 = 100`), insufficient balance, duplicates, history filter/pagination, isolation, transfers (own + peer), concurrency, admin credit, page redirects.
 
-### Database schema
+### 2. Browser walkthrough
 
+1. Open `/register` — set **name**, **username**, password, MPIN → land on dashboard
+2. **New account** — note the account id (shown after create and on the account page)
+3. Open the account → **Add money** / **Withdraw** → check Activity tabs and pagination
+4. Open a second account → **Transfer** (own account or paste another user’s account id)
+5. Sign out → confirm you cannot open `/dashboard` without a session
+6. Optional: **Login as admin** → credit any account (cannot withdraw/transfer)
+
+### 3. API with curl / Postman
+
+```bash
+curl -s -X POST localhost:3000/api/v1/auth/register -H "Content-Type: application/json" \
+  -d '{"name":"Alice Khan","username":"alice","password":"correct-horse-1","mpin":"4821"}'
+
+curl -s -X POST localhost:3000/api/v1/auth/login -H "Content-Type: application/json" \
+  -d '{"method":"password","username":"alice","password":"correct-horse-1"}'
+# Use data.token as: Authorization: Bearer <token>
+
+curl -s -X POST localhost:3000/api/v1/accounts \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"name":"Savings"}'
 ```
-users ─┬─< sessions            (token_hash, expires_at, revoked_at, login_method)
-       └─< accounts ─┬─< transactions >─┐   (append-only ledger; transfer_id for transfer legs)
-                     ├─< transfers ─────┘   (append-only; 1 debit leg + 1 credit leg each)
+
+Every endpoint, error code, and example: [docs/API.md](docs/API.md).
+
+---
+
+## Mapping to the assessment
+
+| Spec | What to look for | Status |
+|---|---|---|
+| §1 Create account | `POST /api/v1/accounts` — system id/`created_at`, balance `0.00`, body cannot set balance | Done |
+| §2 Add transaction | `POST /api/v1/accounts/:id/transactions` — credit/debit, reject overdraft, unique `reference_id` | Done |
+| §3 Balance | `GET /api/v1/accounts/:id/balance` | Done |
+| §4 History | type filter, `page`/`limit` meta, latest first | Done |
+| §5 Integrity | txs immutable (API `405` + DB triggers); balance = Σ credits − Σ debits | Done |
+| §6 Atomicity | one SQL function inserts the tx and updates balance | Done |
+| §7–8 Validation & errors | Zod + `{ error: { code, message, details? } }` | Done |
+| §9 Bonus transfer | `POST /api/v1/transfers` — atomic; rollback on failure | Done |
+| §10–11 | Runnable locally; this README; API.md; assumptions below | Done |
+
+Details and curls: [docs/API.md](docs/API.md). Traceability: [docs/plan.md](docs/plan.md).
+
+---
+
+## Guide through the product
+
+### Auth — extra, but this is what makes it multi-user
+
+Auth is **not** in the original brief. Without it the ledger is a single open API: anyone could create accounts, credit money, or touch any id they guessed. **Login is what turns that into a multi-user system** — every ledger call is tied to a user, and one person cannot see or move another’s money.
+
+- Register with **name** (shown in the UI) and **username** (login handle), plus password and a 4–6 digit MPIN.  
+- Login with either password or MPIN.  
+- Browser keeps an HttpOnly `lf_session` cookie; curl/Postman can send `Authorization: Bearer …`.  
+- Secrets are scrypt-hashed with a server pepper. Five failed logins lock that user for 15 minutes.  
+- Unknown user and wrong secret return the same `401` (no easy username probing).
+
+### Accounts (§1) — scoped to the signed-in user
+
+- Create with a name only. Balance is always `0.00` (DB default; client `balance` is rejected).  
+- List/get only **your** accounts. Another user’s id looks like a missing id (`404`).
+
+### Transactions (§2–4)
+
+- Credit and debit with decimal strings (`NUMERIC(18,2)`).  
+- Debit with insufficient funds → `422`, balance unchanged.  
+- Same `reference_id` on the same account → `409` + existing tx; balance unchanged. Same reference on a **different** account is allowed.  
+- History: filter `credit`/`debit`, paginate, sort newest first.
+
+### Transfers (§9 + peer)
+
+- Source must be yours and funded. Destination may be yours **or** another user’s.  
+- Both legs and the transfer row commit together (or nothing does).  
+- If the destination is someone else’s, `to_balance` is omitted so you cannot spy on their balance.  
+- `GET /accounts/lookup/:id` confirms recipient name without returning balance.
+
+### Integrity (how money stays consistent)
+
+- `accounts.balance` changes only via an insert trigger on `transactions` — not via a free-form UPDATE from the app.  
+- Ledger tables reject UPDATE/DELETE/TRUNCATE.  
+- Concurrent debits use row locks so the balance cannot go negative.  
+- RLS is enabled with no client policies; only the server service role talks to the DB.
+
+### Web UI (extra)
+
+- Dashboard, account page (add / withdraw / history), transfer page, optional admin credit console.  
+- Unsigned visitors are sent to `/login` (`proxy.ts`). API routes still return JSON `401`, not HTML redirects.
+
+```mermaid
+flowchart LR
+  Client[Browser or Postman] --> API["/api/v1"]
+  API --> Auth[Session check]
+  Auth --> Svc[Services]
+  Svc --> RPC[Postgres functions]
+  RPC --> DB[(accounts · transactions · transfers)]
 ```
 
-| Table | Key points |
+---
+
+## What we added beyond the brief
+
+The brief is a ledger API for a trusted caller. **Auth is what makes it multi-user**; the rest below supports that model and makes the API easy to demo.
+
+| Addition | Why it’s here |
 |---|---|
-| `users` | `username` unique (lowercase, format check), `password_hash`, `mpin_hash`, lockout counters |
-| `sessions` | `token_hash` unique (SHA-256), expiry and revocation |
-| `accounts` | `user_id` FK, `balance NUMERIC(18,2) CHECK (balance >= 0)`, name not blank |
-| `transactions` | `UNIQUE (account_id, reference_id)`, `amount > 0`, type enum, history index `(account_id, created_at DESC, id DESC)`, partial unique `(transfer_id, type)` |
-| `transfers` | `CHECK (from <> to)`, `amount > 0`, `UNIQUE (from_account_id, reference_id)` |
+| Auth (password + MPIN) | **This is what makes it multi-user** — without login, anyone could credit or read any account |
+| Display name | Username stays a login handle; UI greets people by name |
+| Isolation (`404` for foreign ids) | Stops account-id probing and cross-user writes |
+| HttpOnly cookie | Browser sessions without exposing the token to JS |
+| Login lockout | Slows password/MPIN guessing |
+| Peer transfer + lookup | Bonus transfer is more useful if you can pay someone else safely |
+| Admin credit console | Optional ops path; users still self-credit per §2 |
+| Web UI + page gate | Lets a reviewer walk the flows without writing every curl |
+| `npm run test:e2e` | Locks the spec examples and isolation rules |
+| `GET /health` | Simple liveness / DB check for hosting |
 
-Integrity guarantees enforced by the database:
+If you stripped these away, the §1–§9 ledger behaviour would still match the brief for a single trusted client. They are not substitutes for the required endpoints.
 
-- **Single source of balance changes:** `accounts.balance` changes only through an `AFTER INSERT` trigger on
-  `transactions`; a guard trigger rejects direct edits of `balance`, `user_id`, `id`, `created_at`.
-  So balance always equals Σ credits − Σ debits. (It is the one intentionally derived column — the assessment
-  requires an account `balance` — and it can't drift.)
-- **Immutability:** `UPDATE`/`DELETE`/`TRUNCATE` on `transactions` and `transfers` raise an error.
-- **No overdraft:** functions lock the account row (`FOR UPDATE`) and check the balance; the `balance >= 0`
-  constraint is the last line of defence.
-- **Idempotency:** `reference_id` is unique per account; duplicates return the existing row, no write.
-- **Atomic transfers:** both accounts locked in id order (no deadlocks); both ledger legs and the transfer row
-  are written in one transaction.
-- **Least privilege:** RLS is on for every table with no policies; table and function privileges are revoked
-  from `anon`/`authenticated`. Only the server's service role can call the functions.
-- **No redundant data:** no stored totals, no duplicated user/account columns; transfer legs are found via
-  `transactions.transfer_id`, not extra pointer columns.
+**Intentionally not built:** AWS deploy (local run satisfies §10), change-password, global API rate limits (only per-user login lockout).
 
 ---
 
 ## Assumptions
 
-- Auth was added to the assessment scope: every endpoint except register/login/health requires login.
-- A user registers with both a password and an MPIN so either login option always works.
-  (Changing MPIN/password is not implemented yet.)
-- Transfers are only between the logged-in user's own accounts.
-- A foreign account id returns the same `404` as a missing one (no existence leak).
-- Money is `NUMERIC(18,2)`; amounts may be sent as numbers or numeric strings (max 2 decimals) and are always returned as strings.
-- Duplicate `reference_id` → `409` (not `200`) with the existing transaction in `error.details`.
-- A missing `type`/`amount` field is a `VALIDATION_ERROR`; a present-but-invalid one gets the specific code.
-- `GET /health` is intentionally outside `/api/v1`.
-- Login lockout is per user (shared by both methods). A determined attacker could deliberately lock a known
-  username; a production deployment would add IP/device rate limiting at the edge (e.g. AWS WAF).
-- Expired/revoked session rows are not purged automatically (a scheduled cleanup would be a later improvement).
+1. **Auth is required** for every ledger route except `register`, `login`, `admin/login`, and `/health`. The brief did not specify auth; **auth is what makes it multi-user** — without it, isolation is meaningless.
+2. Register stores **name** (display) and **username** (unique login).
+3. Users **may credit** their own accounts (brief §2). Admin credit is an extra path, not a replacement.
+4. Transfers may target **another user’s** account; the source must belong to the caller.
+5. A well-formed UUID that belongs to someone else returns `404 ACCOUNT_NOT_FOUND`, same as a missing id, for read/debit/history (no existence leak).
+6. Amounts are `NUMERIC(18,2)`; responses use decimal **strings**.
+7. Duplicate `reference_id` → `409` with the existing transaction in `details` (not a silent `200`).
+8. Login lockout is **per username**. A production deploy should also rate-limit by IP at the edge.
+9. Currency symbol in the UI (`₹`) is display-only; the API is currency-agnostic.
+10. Test data is not deleted (ledger is append-only); each e2e run uses fresh random usernames.
 
-## Hosting (AWS)
+---
 
-Planned target: **AWS Amplify Hosting** for Next.js (see [docs/plan.md](docs/plan.md), Phase 5). Set the three
-environment variables above in the Amplify console, deploy, and use `/health` as the health check.
+## Project layout (where to look)
+
+```
+app/api/v1/          REST handlers
+app/(app)/           Signed-in UI
+app/(auth)/          Login / register
+app/admin/           Admin credit UI
+lib/services/        Auth + ledger use-cases
+lib/auth/            Sessions, hashing, admin
+lib/validation.ts    Zod schemas
+supabase/migrations/ Schema, triggers, RPC
+scripts/e2e.mjs      End-to-end checks
+docs/API.md          API contract
+docs/plan.md         Build plan / checklist
+```
+
+---
+
+## Optional hosting
+
+Local run is enough for the assessment. Deploy notes (e.g. Amplify + env vars + `/health`) live in [docs/plan.md](docs/plan.md) Phase 5.
