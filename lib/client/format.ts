@@ -66,14 +66,34 @@ export function newReference(prefix = "web"): string {
   return `${prefix}-${Date.now().toString(36)}-${rand}`;
 }
 
-const AMOUNT_RE = /^\d{1,16}(\.\d{1,2})?$/;
+/** Max digits before the decimal — matches DB NUMERIC(18,2) / server parseMoney. */
+const MAX_INTEGER_DIGITS = 16;
 
-/** Mirrors the server rules for instant feedback; the server remains the authority. */
+/**
+ * Mirrors server `parseMoney` for instant feedback; the server remains the authority.
+ * Messages are specific so "too large" is never mistaken for a format tip.
+ */
 export function validateAmount(raw: string): string | null {
   const value = raw.trim();
   if (!value) return "Enter an amount";
-  if (!AMOUNT_RE.test(value)) return "Use digits with up to 2 decimals, e.g. 250.50";
-  if (/^0+(\.0+)?$/.test(value)) return "Amount must be greater than 0";
+
+  if (/^-/.test(value)) return "Amount must be greater than 0";
+
+  // Digits with an optional fractional part (reject letters, exponents, commas, etc.).
+  const match = /^(\d+)(?:\.(\d*))?$/.exec(value);
+  if (!match) return "Use digits with up to 2 decimals, e.g. 250.50";
+
+  const [, intPart, fracPart] = match;
+  if (fracPart !== undefined && fracPart.length === 0) {
+    return "Use digits with up to 2 decimals, e.g. 250.50";
+  }
+  if (fracPart !== undefined && fracPart.length > 2) {
+    return "Amount can have at most 2 decimal places";
+  }
+
+  const integer = intPart.replace(/^0+(?=\d)/, "");
+  if (integer.length > MAX_INTEGER_DIGITS) return "Amount is too large";
+  if (/^0+(\.0*)?$/.test(value)) return "Amount must be greater than 0";
   return null;
 }
 

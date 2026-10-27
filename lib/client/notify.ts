@@ -37,11 +37,12 @@ export function notifyError(error: unknown, fallbackTitle = "Something went wron
       error.details && typeof error.details === "object" && "retry_after_seconds" in error.details
         ? Number((error.details as { retry_after_seconds: number }).retry_after_seconds)
         : null;
+    const fieldHint = Object.values(error.fieldErrors)[0];
     const description =
       error.code === "TOO_MANY_ATTEMPTS" && retry
         ? `Try again in about ${Math.ceil(retry / 60)} minute${retry > 60 ? "s" : ""}.`
         : error.code === "VALIDATION_ERROR" || error.code === "INVALID_AMOUNT"
-          ? error.message
+          ? (fieldHint ?? error.message)
           : (known?.hint ?? error.message);
     toast.error(known?.title ?? fallbackTitle, { description });
     return;
