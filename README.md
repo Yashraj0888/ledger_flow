@@ -168,7 +168,7 @@ flowchart LR
 
 ---
 
-## What we added beyond the brief
+## What I added beyond the brief
 
 The brief is a ledger API for a trusted caller. **Auth is what makes it multi-user**; the rest below supports that model and makes the API easy to demo.
 
@@ -186,8 +186,6 @@ The brief is a ledger API for a trusted caller. **Auth is what makes it multi-us
 | `GET /health` | Simple liveness / DB check for hosting |
 
 If you stripped these away, the §1–§9 ledger behaviour would still match the brief for a single trusted client. They are not substitutes for the required endpoints.
-
-**Intentionally not built:** AWS deploy (local run satisfies §10), change-password, global API rate limits (only per-user login lockout).
 
 ---
 
@@ -223,7 +221,3 @@ docs/plan.md         Build plan / checklist
 ```
 
 ---
-
-## Optional hosting
-
-Local run is enough for the assessment. Deploy notes (e.g. Amplify + env vars + `/health`) live in [docs/plan.md](docs/plan.md) Phase 5.
