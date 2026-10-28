@@ -2,13 +2,22 @@
 
 Submission for the **Transaction Ledger API** assessment.
 
-**Live app (usable instantly — no local setup):** [https://ledger-flow-swart.vercel.app/](https://ledger-flow-swart.vercel.app/)  
-API base on the same host: `https://ledger-flow-swart.vercel.app/api/v1`
-
 Stack: **Next.js** (App Router) · **TypeScript** · **Supabase / Postgres**.
 
----
+### Deployment note
 
+This app was deployed on **Vercel** at [https://ledger-flow-swart.vercel.app/](https://ledger-flow-swart.vercel.app/), but that account is currently **suspended due to a payment issue**, so the live link may not work.
+
+For a simple, streamlined production deploy I would use **AWS Amplify Hosting** instead:
+
+1. Connect this GitHub repo in the Amplify console (Next.js SSR app).
+2. Add the same env vars as local: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `AUTH_PEPPER`, and optional `ADMIN_USERNAME` / `ADMIN_PASSWORD`.
+3. Let Amplify build and host on every push to `main` — one place for build, HTTPS, and deploy.
+4. Smoke-test `/health` and a few API calls after the first deploy.
+
+
+
+---
 
 ## Submission pack (assessment §11)
 
@@ -34,13 +43,48 @@ Money rules (no overdraft, duplicate references, immutability, atomic updates) a
 
 On top of the brief we added **auth** (what makes this multi-user), per-user isolation, and a small web UI so you can exercise the API without living in Postman. Details: [What we added beyond the brief](#what-we-added-beyond-the-brief).
 
+### App flow
+
+```mermaid
+flowchart TB
+  subgraph clients [Clients]
+    Browser[Web browser]
+    APIClient[curl / Postman]
+  end
+
+  subgraph next [Next.js app]
+    Proxy[proxy.ts<br/>page session gate]
+    UI[Web UI<br/>dashboard · account · transfer · admin]
+    Routes[API route handlers<br/>/api/v1/*]
+    Auth[Auth layer<br/>session / admin cookie]
+    Services[Services<br/>auth · ledger]
+  end
+
+  subgraph data [Supabase Postgres]
+    RPC[SQL functions<br/>ownership · locks · atomicity]
+    Tables[(users · sessions · accounts<br/>transactions · transfers)]
+  end
+
+  Browser --> Proxy
+  Proxy -->|signed in| UI
+  Proxy -->|signed out| Login[/login/]
+  UI -->|same-origin fetch + cookie| Routes
+  APIClient -->|Bearer token| Routes
+  Routes --> Auth
+  Auth --> Services
+  Services -->|service_role only| RPC
+  RPC --> Tables
+```
+
+Money rules live in Postgres (constraints, triggers, row locks). The API checks who you are; the database is the final authority on balances.
+
+---
+
 ---
 
 ## How to run
 
-**Fastest path:** open the [live app](https://ledger-flow-swart.vercel.app/) and use it in the browser — no install required.
-
-To run locally (optional), you need Node 20+ and a Supabase project:
+The Vercel live URL may be down (see [Deployment note](#deployment-note)). Run locally with Node 20+ and a Supabase project:
 
 ```bash
 npm install
@@ -52,7 +96,7 @@ npm run dev
 ```
 
 Local app: http://localhost:3000 · local API: http://localhost:3000/api/v1  
-Deployed app: https://ledger-flow-swart.vercel.app/ · deployed API: https://ledger-flow-swart.vercel.app/api/v1
+Previous Vercel URL (may be suspended): https://ledger-flow-swart.vercel.app/
 
 | Env var | Role |
 |---|---|
@@ -65,9 +109,9 @@ Deployed app: https://ledger-flow-swart.vercel.app/ · deployed API: https://led
 
 ## How to verify (three paths)
 
-**Tip:** for a quick manual check, use the [live deployment](https://ledger-flow-swart.vercel.app/) — same app and API as local.
+**Tip:** use local `npm run dev`, or the Vercel URL if it is back online.
 
-### 1. Automated suite (local or against the live host)
+### 1. Automated suite (local or against a deployed host)
 
 ```bash
 npm run dev                 # terminal 1 (skip if testing the deployed URL)
@@ -81,7 +125,7 @@ Covers: register/login (password + MPIN), lockout, cookie sessions, create accou
 
 ### 2. Browser walkthrough
 
-Use [https://ledger-flow-swart.vercel.app/](https://ledger-flow-swart.vercel.app/) (or http://localhost:3000 if running locally):
+Use http://localhost:3000 (or the Vercel URL if it is back online):
 
 1. Open `/register` — set **name**, **username**, password, MPIN → land on dashboard
 2. **New account** — note the account id (shown after create and on the account page)
@@ -92,10 +136,10 @@ Use [https://ledger-flow-swart.vercel.app/](https://ledger-flow-swart.vercel.app
 
 ### 3. API with curl / Postman
 
-Same calls work against the live host (swap in `localhost:3000` if you prefer local):
+Point `BASE` at local or a deployed host:
 
 ```bash
-export BASE=https://ledger-flow-swart.vercel.app   # or http://localhost:3000
+export BASE=http://localhost:3000   # or https://ledger-flow-swart.vercel.app if live
 
 curl -s -X POST $BASE/api/v1/auth/register -H "Content-Type: application/json" \
   -d '{"name":"Alice Khan","username":"alice","password":"correct-horse-1","mpin":"4821"}'
@@ -174,59 +218,22 @@ Auth is **not** in the original brief. Without it the ledger is a single open AP
 - Dashboard, account page (add / withdraw / history), transfer page, optional admin credit console.  
 - Unsigned visitors are sent to `/login` (`proxy.ts`). API routes still return JSON `401`, not HTML redirects.
 
-### App flow
-
-```mermaid
-flowchart TB
-  subgraph clients [Clients]
-    Browser[Web browser]
-    APIClient[curl / Postman]
-  end
-
-  subgraph next [Next.js app]
-    Proxy[proxy.ts<br/>page session gate]
-    UI[Web UI<br/>dashboard · account · transfer · admin]
-    Routes[API route handlers<br/>/api/v1/*]
-    Auth[Auth layer<br/>session / admin cookie]
-    Services[Services<br/>auth · ledger]
-  end
-
-  subgraph data [Supabase Postgres]
-    RPC[SQL functions<br/>ownership · locks · atomicity]
-    Tables[(users · sessions · accounts<br/>transactions · transfers)]
-  end
-
-  Browser --> Proxy
-  Proxy -->|signed in| UI
-  Proxy -->|signed out| Login[/login/]
-  UI -->|same-origin fetch + cookie| Routes
-  APIClient -->|Bearer token| Routes
-  Routes --> Auth
-  Auth --> Services
-  Services -->|service_role only| RPC
-  RPC --> Tables
-```
-
-Money rules live in Postgres (constraints, triggers, row locks). The API checks who you are; the database is the final authority on balances.
-
----
-
 ## What I added beyond the brief
 
 The brief is a ledger API for a trusted caller. **Auth is what makes it multi-user**; the rest below supports that model and makes the API easy to demo.
 
-| Addition | Why it’s here |
-|---|---|
-| Auth (password + MPIN) | **This is what makes it multi-user** — without login, anyone could credit or read any account |
-| Display name | Username stays a login handle; UI greets people by name |
-| Isolation (`404` for foreign ids) | Stops account-id probing and cross-user writes |
-| HttpOnly cookie | Browser sessions without exposing the token to JS |
-| Login lockout | Slows password/MPIN guessing |
-| Peer transfer + lookup | Bonus transfer is more useful if you can pay someone else safely |
-| Admin credit console | Optional ops path; users still self-credit per §2 |
-| Web UI + page gate | Lets a reviewer walk the flows without writing every curl |
-| `npm run test:e2e` | Locks the spec examples and isolation rules |
-| `GET /health` | Simple liveness / DB check for hosting |
+| Addition                          | Why it’s here                                                                   |
+| --------------------------------- | ------------------------------------------------------------------------------- |
+| Auth (password + MPIN)            | **This is what makes it multi-user** . Secure transfers between multiple users. |
+| Display name                      | Username stays a login handle; UI greets people by name                         |
+| Isolation (`404` for foreign ids) | Stops account-id probing and cross-user writes                                  |
+| HttpOnly cookie                   | Browser sessions without exposing the token to JS                               |
+| Login lockout                     | Slows password/MPIN guessing                                                    |
+| Peer transfer + lookup            | Bonus transfer is more useful if you can pay someone else safely                |
+| Admin credit console              | Optional ops path; users still self-credit per §2                               |
+| Web UI + page gate                | Lets a reviewer walk the flows without writing every curl                       |
+| `npm run test:e2e`                | Locks the spec examples and isolation rules                                     |
+| `GET /health`                     | Simple liveness / DB check for hosting                                          |
 
 If you stripped these away, the §1–§9 ledger behaviour would still match the brief for a single trusted client. They are not substitutes for the required endpoints.
 
@@ -234,16 +241,16 @@ If you stripped these away, the §1–§9 ledger behaviour would still match the
 
 ## Assumptions
 
-1. **Auth is required** for every ledger route except `register`, `login`, `admin/login`, and `/health`. The brief did not specify auth; **auth is what makes it multi-user** — without it, isolation is meaningless.
-2. Register stores **name** (display) and **username** (unique login).
-3. Users **may credit** their own accounts (brief §2). Admin credit is an extra path, not a replacement.
-4. Transfers may target **another user’s** account; the source must belong to the caller.
-5. A well-formed UUID that belongs to someone else returns `404 ACCOUNT_NOT_FOUND`, same as a missing id, for read/debit/history (no existence leak).
-6. Amounts are `NUMERIC(18,2)`; responses use decimal **strings**.
-7. Duplicate `reference_id` → `409` with the existing transaction in `details` (not a silent `200`).
-8. Login lockout is **per username**. A production deploy should also rate-limit by IP at the edge.
-9. Currency symbol in the UI (`₹`) is display-only; the API is currency-agnostic.
-10. Test data is not deleted (ledger is append-only); each e2e run uses fresh random usernames.
+Simple limits I designed for while building this:
+
+1. Built for a **small demo / assessment**, not a real bank with millions of users.
+2. **Traffic I expect this setup to handle:** roughly a few hundred people using the app at the same time for normal browsing and API calls, and maybe tens of money moves (credit / debit / transfer) happening at once.
+3. Uses **one app** and **one database**. That is enough here; I did not plan for many servers or many regions.
+4. Money has **two decimal places** only (like `100.50`).
+5. The app does **not** handle other currencies, fees, or interest.
+6. Login is **simple** (username + password or MPIN). No Google login, SMS codes, or advanced security tools.
+7. There is **one admin login** (from env settings) for demos — not a full staff permission system.
+8. If the host or database is down, the app **stops working** until they are back.
 
 ---
 

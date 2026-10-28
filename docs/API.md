@@ -17,12 +17,30 @@ All behaviours below are implemented and checked by `npm run test:e2e`. This fil
 
 ## Simple rules (read this first)
 
-1. **Talk JSON.** Send `Content-Type: application/json`. Bodies and answers are JSON.
-2. **Sign in first.** Almost every call needs a session. Exceptions: register, login, admin login, `/health`.
-3. **Your money only.** You only see and change **your** accounts. Someone else’s account id looks like “not found” (`404`).
-4. **Money is text with 2 decimals.** Example: `"100.00"`. We do not return floating-point numbers.
-5. **Ids are UUIDs.** Long ids like `3fa85f64-5717-4562-b3fc-2c963f66afa6`.
-6. **Lists can be paged.** Use `page` (starts at 1) and `limit` (default 20, max 100). History is newest first.
+## API Usage Guidelines
+
+1. **JSON Format**
+
+   Send requests with `Content-Type: application/json`. Request bodies and API responses use JSON format.
+2. **Authentication Required**
+
+   Most endpoints require an active session. The following endpoints are accessible without an existing session: registration, login, admin login, and `/health`.
+3. **Account Ownership and Privacy**
+
+   Each user can create and manage **multiple accounts** under a single user profile. You can only view or modify accounts that belong to you. Requests involving another user's account ID return `404 Not Found` to prevent unauthorized access and avoid revealing whether the account exists.
+4. **Monetary Values**
+
+   Monetary amounts are represented as strings with exactly two decimal places to ensure precision. For example, `"100.00"`. The API does not return monetary values as floating-point numbers.
+5. **ID Format**
+
+   All resource IDs use UUIDs. For example, `3fa85f64-5717-4562-b3fc-2c963f66a235`.
+6. **Pagination and Transaction History**
+
+   List endpoints support pagination using the `page` and `limit` query parameters:
+   - `page`: The page number, starting at `1`.
+   - `limit`: The number of records per page. Defaults to `20`, with a maximum of `100`.
+
+    Transaction history is returned in reverse chronological order, with the newest transactions appearing first.
 
 ### Signing in (auth) — this is what makes it multi-user
 
@@ -108,7 +126,7 @@ Always the same shape:
 
 ---
 
-## API Endpoints 
+## API Endpoints
 
 Authentication
 
