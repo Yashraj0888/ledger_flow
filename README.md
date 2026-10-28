@@ -2,9 +2,13 @@
 
 Submission for the **Transaction Ledger API** assessment.
 
+**Live app (usable instantly — no local setup):** [https://ledger-flow-swart.vercel.app/](https://ledger-flow-swart.vercel.app/)  
+API base on the same host: `https://ledger-flow-swart.vercel.app/api/v1`
+
 Stack: **Next.js** (App Router) · **TypeScript** · **Supabase / Postgres**.
 
 ---
+
 
 ## Submission pack (assessment §11)
 
@@ -34,7 +38,9 @@ On top of the brief we added **auth** (what makes this multi-user), per-user iso
 
 ## How to run
 
-Needs Node 20+ and a Supabase project.
+**Fastest path:** open the [live app](https://ledger-flow-swart.vercel.app/) and use it in the browser — no install required.
+
+To run locally (optional), you need Node 20+ and a Supabase project:
 
 ```bash
 npm install
@@ -45,7 +51,8 @@ cp .env.example .env.local
 npm run dev
 ```
 
-App: http://localhost:3000 · API base: http://localhost:3000/api/v1
+Local app: http://localhost:3000 · local API: http://localhost:3000/api/v1  
+Deployed app: https://ledger-flow-swart.vercel.app/ · deployed API: https://ledger-flow-swart.vercel.app/api/v1
 
 | Env var | Role |
 |---|---|
@@ -58,17 +65,23 @@ App: http://localhost:3000 · API base: http://localhost:3000/api/v1
 
 ## How to verify (three paths)
 
-### 1. Automated suite (recommended)
+**Tip:** for a quick manual check, use the [live deployment](https://ledger-flow-swart.vercel.app/) — same app and API as local.
+
+### 1. Automated suite (local or against the live host)
 
 ```bash
-npm run dev                 # terminal 1
+npm run dev                 # terminal 1 (skip if testing the deployed URL)
 npm run test:e2e            # terminal 2 — hits the real DB
 npm run test:e2e -- --offline
+# Or point the suite at the deployed app:
+BASE_URL=https://ledger-flow-swart.vercel.app npm run test:e2e
 ```
 
 Covers: register/login (password + MPIN), lockout, cookie sessions, create account at `0`, credit/debit walkthrough (`+100 +50 −30 −20 = 100`), insufficient balance, duplicates, history filter/pagination, isolation, transfers (own + peer), concurrency, admin credit, page redirects.
 
 ### 2. Browser walkthrough
+
+Use [https://ledger-flow-swart.vercel.app/](https://ledger-flow-swart.vercel.app/) (or http://localhost:3000 if running locally):
 
 1. Open `/register` — set **name**, **username**, password, MPIN → land on dashboard
 2. **New account** — note the account id (shown after create and on the account page)
@@ -79,15 +92,19 @@ Covers: register/login (password + MPIN), lockout, cookie sessions, create accou
 
 ### 3. API with curl / Postman
 
+Same calls work against the live host (swap in `localhost:3000` if you prefer local):
+
 ```bash
-curl -s -X POST localhost:3000/api/v1/auth/register -H "Content-Type: application/json" \
+export BASE=https://ledger-flow-swart.vercel.app   # or http://localhost:3000
+
+curl -s -X POST $BASE/api/v1/auth/register -H "Content-Type: application/json" \
   -d '{"name":"Alice Khan","username":"alice","password":"correct-horse-1","mpin":"4821"}'
 
-curl -s -X POST localhost:3000/api/v1/auth/login -H "Content-Type: application/json" \
+curl -s -X POST $BASE/api/v1/auth/login -H "Content-Type: application/json" \
   -d '{"method":"password","username":"alice","password":"correct-horse-1"}'
 # Use data.token as: Authorization: Bearer <token>
 
-curl -s -X POST localhost:3000/api/v1/accounts \
+curl -s -X POST $BASE/api/v1/accounts \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"name":"Savings"}'
 ```
