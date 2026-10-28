@@ -61,37 +61,39 @@ Without login, anyone could touch any account. Auth ties every request to one pe
 - **Transfer** from your account to another of yours, or to someone else’s account. You do not see their balance.
 - **Admin** (optional, separate login): can list all accounts and **add** money only — cannot withdraw or transfer.
 
-### When a call works
+### How responses look
 
-One thing:
+Every reply is JSON. There are only two cases:
+
+**1. Success** — look inside `data` for the result.
+
+One item (account, transaction, balance, etc.):
 
 ```json
-{ "data": { } }
+{ "data": { "id": "...", "balance": "100.00" } }
 ```
 
-A list (with page info):
+A list (accounts or history). Extra `pagination` tells you which page you are on:
 
 ```json
 {
-  "data": [ ],
+  "data": [ { "id": "..." }, { "id": "..." } ],
   "pagination": {
     "current_page": 1,
     "page_size": 20,
-    "total_records": 0,
-    "total_pages": 0
+    "total_records": 42,
+    "total_pages": 3
   }
 }
 ```
 
-### When a call fails
-
-Always the same shape:
+**2. Failure** — look inside `error`. Same shape every time:
 
 ```json
 {
   "error": {
-    "code": "ERROR_CODE",
-    "message": "Short human explanation",
+    "code": "INVALID_AMOUNT",
+    "message": "Amount must be greater than 0",
     "details": [
       { "field": "amount", "message": "Amount must be greater than 0" }
     ]
@@ -99,7 +101,9 @@ Always the same shape:
 }
 ```
 
-`details` is optional. It might be a list of field problems, an object (e.g. the duplicate transaction), or missing.
+- `code` — machine name of the problem (see the table below)
+- `message` — short text you can show a person
+- `details` — optional; extra info (which field failed, or the existing transaction on a duplicate)
 
 ---
 

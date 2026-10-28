@@ -279,7 +279,6 @@ Ways to grow beyond the current setup:
 3. **Richer money features** — support other currencies, fees, and interest if the product needs them.
 4. **Stronger login options** — Google / OAuth, SMS codes, IP rate limits at the edge, and longer-lived session refresh.
 5. **Full staff admin** — roles and permissions for multiple admins, audit logs, instead of one shared env login.
-6. **Deploy path** — finish AWS Amplify (or restore Vercel) so reviewers always have a live URL without local setup.
 
 ---
 
