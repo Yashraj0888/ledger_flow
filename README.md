@@ -10,7 +10,13 @@ Stack: **Next.js** (App Router) · **TypeScript** · **Supabase / Postgres**.
 
 Home screen after login. Shows your accounts and balances, and lets you open an account or start a transfer.
 
+<img width="3738" height="2070" alt="image" src="https://github.com/user-attachments/assets/93747703-276b-4026-a634-99119de6613c" />
+
+
 ### Payment history
+
+<img width="3734" height="2070" alt="image" src="https://github.com/user-attachments/assets/a877623d-82d4-4c7d-81ff-715fdbbf5a0c" />
+
 
 Account activity view. Lists credits, debits, and transfers for one account, with filters and pages.
 
@@ -27,7 +33,7 @@ For a simple, streamlined production deploy I would use **AWS Amplify Hosting** 
 3. Let Amplify build and host on every push to `main` — one place for build, HTTPS, and deploy.
 4. Smoke-test `/health` and a few API calls after the first deploy.
 
-
+<img width="3127" height="1568" alt="image" src="https://github.com/user-attachments/assets/7c3f10d7-08d2-4530-a8f8-7a644b3d8dfe" />
 
 ---
 
