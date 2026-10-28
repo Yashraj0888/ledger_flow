@@ -157,14 +157,40 @@ Auth is **not** in the original brief. Without it the ledger is a single open AP
 - Dashboard, account page (add / withdraw / history), transfer page, optional admin credit console.  
 - Unsigned visitors are sent to `/login` (`proxy.ts`). API routes still return JSON `401`, not HTML redirects.
 
+### App flow
+
 ```mermaid
-flowchart LR
-  Client[Browser or Postman] --> API["/api/v1"]
-  API --> Auth[Session check]
-  Auth --> Svc[Services]
-  Svc --> RPC[Postgres functions]
-  RPC --> DB[(accounts · transactions · transfers)]
+flowchart TB
+  subgraph clients [Clients]
+    Browser[Web browser]
+    APIClient[curl / Postman]
+  end
+
+  subgraph next [Next.js app]
+    Proxy[proxy.ts<br/>page session gate]
+    UI[Web UI<br/>dashboard · account · transfer · admin]
+    Routes[API route handlers<br/>/api/v1/*]
+    Auth[Auth layer<br/>session / admin cookie]
+    Services[Services<br/>auth · ledger]
+  end
+
+  subgraph data [Supabase Postgres]
+    RPC[SQL functions<br/>ownership · locks · atomicity]
+    Tables[(users · sessions · accounts<br/>transactions · transfers)]
+  end
+
+  Browser --> Proxy
+  Proxy -->|signed in| UI
+  Proxy -->|signed out| Login[/login/]
+  UI -->|same-origin fetch + cookie| Routes
+  APIClient -->|Bearer token| Routes
+  Routes --> Auth
+  Auth --> Services
+  Services -->|service_role only| RPC
+  RPC --> Tables
 ```
+
+Money rules live in Postgres (constraints, triggers, row locks). The API checks who you are; the database is the final authority on balances.
 
 ---
 
