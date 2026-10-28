@@ -4,6 +4,18 @@ Submission for the **Transaction Ledger API** assessment.
 
 Stack: **Next.js** (App Router) · **TypeScript** · **Supabase / Postgres**.
 
+## UI screenshots
+
+### Dashboard
+
+Home screen after login. Shows your accounts and balances, and lets you open an account or start a transfer.
+
+### Payment history
+
+Account activity view. Lists credits, debits, and transfers for one account, with filters and pages.
+
+---
+
 ### Deployment note
 
 This app was deployed on **Vercel** at [https://ledger-flow-swart.vercel.app/](https://ledger-flow-swart.vercel.app/), but that account is currently **suspended due to a payment issue**, so the live link may not work.
