@@ -2,6 +2,8 @@
 
 Submission for the **Transaction Ledger API** assessment.
 
+This app isdeployed on **Vercel** at [https://ledger-flow-swart.vercel.app/](https://ledger-flow-swart.vercel.app/)
+
 Stack: **Next.js** (App Router) · **TypeScript** · **Supabase / Postgres**.
 
 ## UI screenshots
@@ -10,13 +12,11 @@ Stack: **Next.js** (App Router) · **TypeScript** · **Supabase / Postgres**.
 
 Home screen after login. Shows your accounts and balances, and lets you open an account or start a transfer.
 
-<img width="3738" height="2070" alt="image" src="https://github.com/user-attachments/assets/93747703-276b-4026-a634-99119de6613c" />
-
+![image](https://github.com/user-attachments/assets/93747703-276b-4026-a634-99119de6613c)
 
 ### Payment history
 
-<img width="3734" height="2070" alt="image" src="https://github.com/user-attachments/assets/a877623d-82d4-4c7d-81ff-715fdbbf5a0c" />
-
+![image](https://github.com/user-attachments/assets/a877623d-82d4-4c7d-81ff-715fdbbf5a0c)
 
 Account activity view. Lists credits, debits, and transfers for one account, with filters and pages.
 
@@ -24,7 +24,7 @@ Account activity view. Lists credits, debits, and transfers for one account, wit
 
 ### Deployment note
 
-This app was deployed on **Vercel** at [https://ledger-flow-swart.vercel.app/](https://ledger-flow-swart.vercel.app/), but that account is currently **suspended due to a payment issue**, so the live link may not work.
+Due to payment issues I am unable to deploy it on AWS, but here is the plan.
 
 For a simple, streamlined production deploy I would use **AWS Amplify Hosting** instead:
 
@@ -33,7 +33,7 @@ For a simple, streamlined production deploy I would use **AWS Amplify Hosting** 
 3. Let Amplify build and host on every push to `main` — one place for build, HTTPS, and deploy.
 4. Smoke-test `/health` and a few API calls after the first deploy.
 
-<img width="3127" height="1568" alt="image" src="https://github.com/user-attachments/assets/7c3f10d7-08d2-4530-a8f8-7a644b3d8dfe" />
+![image](https://github.com/user-attachments/assets/7c3f10d7-08d2-4530-a8f8-7a644b3d8dfe)
 
 ---
 
@@ -259,16 +259,27 @@ If you stripped these away, the §1–§9 ledger behaviour would still match the
 
 ## Assumptions
 
-Simple limits I designed for while building this:
+What this build is designed around today:
 
-1. Built for a **small demo / assessment**, not a real bank with millions of users.
-2. **Traffic I expect this setup to handle:** roughly a few hundred people using the app at the same time for normal browsing and API calls, and maybe tens of money moves (credit / debit / transfer) happening at once.
-3. Uses **one app** and **one database**. That is enough here; I did not plan for many servers or many regions.
-4. Money has **two decimal places** only (like `100.50`).
-5. The app does **not** handle other currencies, fees, or interest.
-6. Login is **simple** (username + password or MPIN). No Google login, SMS codes, or advanced security tools.
-7. There is **one admin login** (from env settings) for demos — not a full staff permission system.
-8. If the host or database is down, the app **stops working** until they are back.
+1. Built as a **small demo / assessment** app.
+2. **Rough capacity today:** a few hundred people browsing at once, and maybe tens of money moves (credit / debit / transfer) at once.
+3. Runs as **one app** with **one database**.
+4. Money uses **two decimal places** (like `100.50`).
+5. Amounts are in **one currency** (the UI `₹` is display-only).
+6. Login is **username + password or MPIN**.
+7. There is **one admin login** (from env settings) for demos, used to credit user accounts.
+8. The app needs the **host and database to be up** to serve requests.
+
+## TODO (next improvements)
+
+Ways to grow beyond the current setup:
+
+1. **Scale traffic** — add more app instances, connection pooling, and read replicas so more people can browse and move money at once.
+2. **Multi-region / high availability** — run the app and database in more than one region so a single outage does not take everything down.
+3. **Richer money features** — support other currencies, fees, and interest if the product needs them.
+4. **Stronger login options** — Google / OAuth, SMS codes, IP rate limits at the edge, and longer-lived session refresh.
+5. **Full staff admin** — roles and permissions for multiple admins, audit logs, instead of one shared env login.
+6. **Deploy path** — finish AWS Amplify (or restore Vercel) so reviewers always have a live URL without local setup.
 
 ---
 
